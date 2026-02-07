@@ -1,0 +1,8 @@
+requests
+fastapi
+uvicorn
+PyYAML
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+tmdbv3api
