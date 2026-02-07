@@ -1,0 +1,11 @@
+node_modules
+.output
+.nuxt
+__pycache__
+*.pyc
+.git
+.idea
+.vscode
+venv
+.env
+ZongziBay.db
