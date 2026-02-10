@@ -8,6 +8,7 @@ from app.core.config import Config
 from app.core.qb_client import QBittorrentClient
 from app.schemas.base import BusinessException, ErrorCode
 from app.schemas.magnet import MagnetFile
+from app.schemas.notification import NotificationType
 from app.core import db
 
 logger = logging.getLogger(__name__)
@@ -171,7 +172,7 @@ class MagnetService:
             success = client.add_torrent(urls=magnet_link, is_paused=False, save_path=target_path)
             if not success:
                 raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="添加下载任务失败")
-            db.insert_notification(title="开始下载", content=f"开始下载任务: {torrent_hash}", type="info")
+            db.insert_notification(title="开始下载", content=f"开始下载任务: {torrent_hash}", type=NotificationType.INFO.value)
         except Exception as e:
             raise BusinessException(code=ErrorCode.OPERATION_ERROR,
                                     message=f"添加下载任务失败: {e}")

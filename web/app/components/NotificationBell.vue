@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { Bell, Check, Trash2, X } from 'lucide-vue-next'
+import { Bell, Check, Trash2, X, CheckCircle2, XCircle, AlertTriangle, Info } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { onClickOutside } from '@vueuse/core'
 import { 
@@ -17,6 +17,9 @@ const unreadCount = ref(0)
 const isOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const isLoading = ref(false)
+const hasMore = ref(true)
+const page = ref(1)
+const pageSize = 20
 let countTimer: number | undefined
 let listTimer: number | undefined
 
@@ -24,17 +27,40 @@ onClickOutside(dropdownRef, () => {
   isOpen.value = false
 })
 
-const fetchNotifications = async (silent = false) => {
+const fetchNotifications = async (isLoadMore = false, silent = false) => {
+  if (isLoadMore && (!hasMore.value || isLoading.value)) return
+  
   try {
     if (!silent) isLoading.value = true
-    const res = await getNotifications({ page: 1, page_size: 20 }, silent ? { skipErrorHandler: true } : {})
+    const currentPage = isLoadMore ? page.value + 1 : 1
+    
+    const res = await getNotifications({ page: currentPage, page_size: pageSize }, silent ? { skipErrorHandler: true } : {})
+    
     if (res.code === 200) {
-      notifications.value = res.data.items
+      const newItems = res.data.items || []
+      const total = res.data.total || 0
+      
+      if (isLoadMore) {
+        notifications.value.push(...newItems)
+        page.value = currentPage
+      } else {
+        notifications.value = newItems
+        page.value = 1
+      }
+      
+      hasMore.value = notifications.value.length < total
     }
   } catch (error) {
     console.error(error)
   } finally {
     if (!silent) isLoading.value = false
+  }
+}
+
+const onScroll = (e: Event) => {
+  const target = e.target as HTMLElement
+  if (target.scrollHeight - target.scrollTop - target.clientHeight < 50) {
+    fetchNotifications(true)
   }
 }
 
@@ -55,9 +81,9 @@ const toggleDropdown = () => {
 
 watch(isOpen, (val) => {
   if (val) {
-    fetchNotifications()
+    fetchNotifications(false)
     fetchUnreadCount()
-    listTimer = window.setInterval(() => fetchNotifications(true), 5000)
+    listTimer = window.setInterval(() => fetchNotifications(false, true), 5000)
   } else {
     if (listTimer) clearInterval(listTimer)
   }
@@ -127,7 +153,7 @@ onUnmounted(() => {
         </Button>
       </div>
       
-      <div class="max-h-[400px] overflow-y-auto p-2 space-y-1">
+      <div class="max-h-[400px] overflow-y-auto p-2 space-y-1" @scroll="onScroll">
         <div v-if="isLoading && notifications.length === 0" class="text-center py-4 text-muted-foreground text-sm">
             加载中...
         </div>
@@ -139,6 +165,13 @@ onUnmounted(() => {
              class="flex gap-3 p-3 rounded-lg hover:bg-muted/80 transition-all duration-200 relative group cursor-default"
              :class="{ 'bg-muted/30': item.isRead === 1, 'bg-background hover:bg-muted/50': item.isRead === 0 }">
           
+          <div class="flex-shrink-0 pt-0.5">
+              <CheckCircle2 v-if="item.type === 'success'" class="w-4 h-4 text-green-500" />
+              <XCircle v-else-if="item.type === 'error'" class="w-4 h-4 text-red-500" />
+              <AlertTriangle v-else-if="item.type === 'warning'" class="w-4 h-4 text-yellow-500" />
+              <Info v-else class="w-4 h-4 text-blue-500" />
+          </div>
+
           <div class="flex-1 space-y-1.5">
              <div class="flex items-start justify-between">
                 <p class="text-sm font-medium leading-none flex items-center gap-2">
@@ -151,6 +184,10 @@ onUnmounted(() => {
                {{ item.content }}
              </p>
           </div>
+        </div>
+
+        <div v-if="isLoading && notifications.length > 0" class="py-2 text-center text-xs text-muted-foreground">
+           加载更多...
         </div>
       </div>
     </div>
