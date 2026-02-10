@@ -1,3 +1,4 @@
+from typing import Tuple, List
 import threading
 import time
 import logging
@@ -5,6 +6,7 @@ import re
 import os
 from app.core import db
 from app.services.magnet_service import magnet_service
+from app.schemas.notification import NotificationType
 
 logger = logging.getLogger(__name__)
 
@@ -114,25 +116,31 @@ class TaskMonitor:
                 if client.rename_file(torrent_hash, old_path, new_path):
                     db.update_file_task_status(ft['id'], 'completed')
                     logger.info(f"重命名成功: {old_path} -> {new_path}")
-                    db.insert_notification(title="重命名成功", content=f"{old_path} -> {new_path}", type="success")
+                    db.insert_notification(title="重命名成功", content=f"{old_path} -> {new_path}", type=NotificationType.SUCCESS.value)
                 else:
                     if client.rename_folder(torrent_hash, old_path, new_path):
                         db.update_file_task_status(ft['id'], 'completed')
                         logger.info(f"文件夹重命名成功: {old_path} -> {new_path}")
-                        db.insert_notification(title="文件夹重命名成功", content=f"{old_path} -> {new_path}", type="success")
+                        db.insert_notification(title="文件夹重命名成功", content=f"{old_path} -> {new_path}", type=NotificationType.SUCCESS.value)
                     else:
                         logger.error(f"重命名失败: {old_path} -> {new_path}")
                         db.update_file_task_status(ft['id'], 'failed', "QB API returned fail")
-                        db.insert_notification(title="重命名失败", content=f"{old_path} -> {new_path}: QB API fail", type="error")
+                        db.insert_notification(title="重命名失败", content=f"{old_path} -> {new_path}: QB API fail", type=NotificationType.ERROR.value)
             except Exception as e:
                 logger.error(f"重命名异常: {e}")
                 db.update_file_task_status(ft['id'], 'failed', str(e))
-                db.insert_notification(title="重命名异常", content=f"{old_path} -> {new_path}: {e}", type="error")
+                db.insert_notification(title="重命名异常", content=f"{old_path} -> {new_path}: {e}", type=NotificationType.ERROR.value)
 
-    def _maybe_move_location(self, client, task_id: int, torrent_hash: str, torrent_info: dict, target_path: str):
+    def _maybe_move_location(self, client, task_id: int, torrent_hash: str, torrent_info: dict, target_path: str) -> Tuple[bool, str, str]:
+        """
+        尝试移动任务位置
+        Returns:
+            (is_moved, local_mkdir_path, qb_move_path)
+            is_moved: 是否发送了移动指令 (True) 或已经位于目标位置 (False)
+        """
         if not target_path:
             logger.info(f"任务 {task_id} 目标路径为空，跳过移动")
-            return
+            return False, "", ""
 
         from app.core.config import Config
         config = Config()
@@ -188,10 +196,90 @@ class TaskMonitor:
             logger.info(f"正在移动任务 {task_id} 到 {qb_move_path}")
             if client.set_location(torrent_hash, qb_move_path):
                 logger.info(f"移动指令已发送: {qb_move_path}")
-                db.insert_notification(title="开始移动任务", content=f"任务 {task_id} 正在移动到 {qb_move_path}", type="info")
+                db.insert_notification(title="开始移动任务", content=f"任务 {task_id} 正在移动到 {qb_move_path}", type=NotificationType.INFO.value)
+                return True, local_mkdir_path, qb_move_path
             else:
                 logger.error(f"移动失败: {qb_move_path}")
-                db.insert_notification(title="移动任务失败", content=f"任务 {task_id} 移动到 {qb_move_path} 失败", type="error")
+                db.insert_notification(title="移动任务失败", content=f"任务 {task_id} 移动到 {qb_move_path} 失败", type=NotificationType.ERROR.value)
+                return False, local_mkdir_path, qb_move_path
+        
+        return False, local_mkdir_path, qb_move_path
+
+    def _verify_move(self, client, torrent_hash: str, local_path: str, qb_path: str, file_tasks: List[dict]):
+        """
+        验证移动结果
+        1. 轮询 qB 检查 save_path 是否更新
+        2. 检查本地文件是否存在
+        """
+        logger.info(f"开始验证移动结果: {local_path}")
+        
+        # 1. 轮询 qB 状态 (最多 20 秒)
+        qb_updated = False
+        for _ in range(10):
+            try:
+                info = client.get_torrent_info(torrent_hash)
+                if not info:
+                    break
+                current_save_path = info.get('save_path', '')
+                
+                # 比较路径
+                try:
+                    p1 = os.path.normpath(current_save_path)
+                    p2 = os.path.normpath(qb_path)
+                    if p1 == p2:
+                        qb_updated = True
+                        break
+                except:
+                    if current_save_path == qb_path:
+                        qb_updated = True
+                        break
+            except Exception as e:
+                logger.warning(f"验证移动时获取种子信息失败: {e}")
+            
+            time.sleep(2)
+        
+        if not qb_updated:
+            logger.warning(f"移动验证超时: qB save_path 未更新 (expect: {qb_path})")
+            db.insert_notification(title="移动验证警告", content=f"qBittorrent 状态未及时更新，请稍后检查文件位置", type=NotificationType.WARNING.value)
+            return
+
+        # 2. 检查本地文件
+        files_found = False
+        try:
+            if not os.path.exists(local_path):
+                logger.warning(f"移动验证失败: 本地目录不存在 {local_path}")
+            else:
+                # 目录存在，检查文件
+                if file_tasks:
+                    # 如果有具体文件任务，检查重命名后的文件
+                    missing_files = []
+                    for ft in file_tasks:
+                        fname = ft.get('file_rename')
+                        if fname:
+                            fpath = os.path.join(local_path, fname)
+                            if not os.path.exists(fpath):
+                                missing_files.append(fname)
+                    
+                    if missing_files:
+                        logger.warning(f"移动验证: 部分文件未找到 {missing_files}")
+                        files_found = False # 部分丢失也算没完全成功? 或者算部分成功
+                        # 这里还是算存在吧，只要目录在
+                        if len(missing_files) < len(file_tasks):
+                            files_found = True
+                    else:
+                        files_found = True
+                else:
+                    # 没有具体文件任务，只要目录不为空即可?
+                    # 简单起见，只要目录存在就算成功
+                    files_found = True
+        except Exception as e:
+            logger.error(f"移动验证异常: {e}")
+        
+        if files_found:
+            logger.info("移动验证成功: 文件已存在")
+            db.insert_notification(title="移动完成", content=f"文件已成功移动到: {local_path}", type=NotificationType.SUCCESS.value)
+        else:
+            db.insert_notification(title="移动验证失败", content=f"目录已创建但文件未找到: {local_path}", type=NotificationType.WARNING.value)
 
     def _handle_completed_task(self, client, task: dict, torrent_hash: str, torrent_info: dict):
         file_tasks = []
@@ -210,11 +298,37 @@ class TaskMonitor:
             if file_tasks:
                 # 寻找第一个非空的 targetPath
                 for ft in file_tasks:
-                    if ft.get('targetPath'):
-                        final_target_path = ft['targetPath']
+                    ft_target = ft.get('targetPath')
+                    if ft_target:
+                        # 如果是绝对路径，直接使用
+                        if os.path.isabs(ft_target):
+                            final_target_path = ft_target
+                        else:
+                            # 如果是相对路径，基于 task['targetPath'] 拼接
+                            # task['targetPath'] 应该是绝对路径 (在 add_task 时处理过)
+                            # 但为了安全，如果 task['targetPath'] 为空，则保留相对路径交给 _maybe_move_location 处理
+                            if final_target_path:
+                                final_target_path = os.path.join(final_target_path, ft_target)
+                            else:
+                                # 如果 task['targetPath'] 为空，说明数据库中未指定目标路径
+                                # 此时如果使用 ft_target（相对路径），它会被 _maybe_move_location 拼接到 default_target_path
+                                # 这种情况应该发个警告
+                                final_target_path = ft_target
+                                db.insert_notification(
+                                    title="路径降级警告", 
+                                    content=f"任务 {task['taskName']} 未指定基础目标路径，将使用默认路径拼接: {ft_target}", 
+                                    type=NotificationType.WARNING.value
+                                )
+                        
+                        # 统一路径分隔符
+                        final_target_path = final_target_path.replace('\\', '/')
                         break
             
-            self._maybe_move_location(client, task['id'], torrent_hash, torrent_info, final_target_path)
+            is_moved, local_path, qb_path = self._maybe_move_location(client, task['id'], torrent_hash, torrent_info, final_target_path)
+            
+            if is_moved:
+                # 执行验证
+                self._verify_move(client, torrent_hash, local_path, qb_path, file_tasks)
         except Exception as e:
             logger.error(f"处理文件移动任务失败: {e}")
 
@@ -268,7 +382,7 @@ class TaskMonitor:
                 # 如果是 error 状态，尝试自动恢复 (用户要求：看见错误尝试启动运行)
                 if new_status == 'error':
                     if current_status != 'error':
-                        db.insert_notification(title="任务出错", content=f"任务 {task['taskName']} 状态异常 ({qb_state})，尝试自动恢复", type="warning")
+                        db.insert_notification(title="任务出错", content=f"任务 {task['taskName']} 状态异常 ({qb_state})，尝试自动恢复", type=NotificationType.WARNING.value)
 
                     logger.warning(f"任务 {task['id']} 状态异常 ({qb_state})，尝试自动恢复...")
                     try:
@@ -279,7 +393,7 @@ class TaskMonitor:
                 # 6. 处理已完成任务 (例如后续处理)
                 if new_status == 'completed' and current_status != 'completed':
                     logger.info(f"任务 {task['id']} 已完成，开始执行后续处理: {torrent_info.get('name')}")
-                    db.insert_notification(title="任务下载完成", content=f"任务 {task['taskName']} 下载完成，开始后续处理", type="success")
+                    db.insert_notification(title="任务下载完成", content=f"任务 {task['taskName']} 下载完成，开始后续处理", type=NotificationType.SUCCESS.value)
                     try:
                         # 先设置为 moving 状态，让前端感知到正在处理
                         db.update_task_status(task['id'], "moving", progress)
@@ -288,10 +402,10 @@ class TaskMonitor:
                         
                         # 后续处理成功后，才更新状态为 completed
                         db.update_task_status(task['id'], new_status, progress)
-                        db.insert_notification(title="任务处理完成", content=f"任务 {task['taskName']} 后续处理完成", type="success")
+                        db.insert_notification(title="任务处理完成", content=f"任务 {task['taskName']} 后续处理完成", type=NotificationType.SUCCESS.value)
                     except Exception as e:
                         logger.error(f"任务 {task['id']} 后续处理失败: {e}")
-                        db.insert_notification(title="任务处理失败", content=f"任务 {task['taskName']} 后续处理失败: {e}", type="error")
+                        db.insert_notification(title="任务处理失败", content=f"任务 {task['taskName']} 后续处理失败: {e}", type=NotificationType.ERROR.value)
                         # 处理失败，不更新为 completed，仅更新进度，保留原状态以便下次重试
                         # 或者设置为 error 状态？ 暂时保留原状态
                         db.update_task_status(task['id'], current_status, progress)

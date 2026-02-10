@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import Config
+from app.schemas.notification import NotificationType
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +242,7 @@ class Database:
         self,
         title: str,
         content: str = None,
-        type: str = 'info'
+        type: str = NotificationType.INFO.value
     ) -> int:
         """插入新通知"""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

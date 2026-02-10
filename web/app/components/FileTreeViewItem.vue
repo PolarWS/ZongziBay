@@ -1,47 +1,27 @@
 <script setup lang="ts">
 import { computed, inject, type Ref } from 'vue'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Folder, FolderOpen, File as FileIcon, ChevronRight, ChevronDown, Minus } from 'lucide-vue-next'
+import { Folder, FolderOpen, File as FileIcon, ChevronRight, ChevronDown, Minus, Check } from 'lucide-vue-next'
 
 const props = defineProps<{
   node: any
-  level: number
-  expandedKeys: Set<string>
+  indentGuides: boolean[] // true = draw vertical line, false = empty space
+  isLast: boolean
+  collapsedKeys: Set<string>
 }>()
 
 const emit = defineEmits(['toggleExpand', 'toggleCheck'])
 const fileTreeFiles = inject<Ref<any[]>>('fileTreeFiles')
 
 const isFolder = computed(() => !props.node.isFile)
-const isExpanded = computed(() => props.expandedKeys.has(props.node.key))
-
-const paddingLeft = computed(() => `${props.level * 1.5}rem`)
+// Default expanded: isExpanded is true unless key is in collapsedKeys
+const isExpanded = computed(() => !props.collapsedKeys.has(props.node.key))
 
 // Computed state for Folders only
 const folderCheckState = computed(() => {
-  if (!isFolder.value) return false // Should not be called for files usually
-  if (!fileTreeFiles?.value) return false
-
-  const prefix = props.node.key + '/'
-  let hasChecked = false
-  let hasUnchecked = false
-  
-  // Use simple for loop for performance
-  for (const f of fileTreeFiles.value) {
-      const p = f.newName || f.name || f.path || ''
-      const normalizedPath = p.split(/[/\\]/).filter(Boolean).join('/')
-      
-      if (normalizedPath === props.node.key || normalizedPath.startsWith(prefix)) {
-          if (f.checked) hasChecked = true
-          else hasUnchecked = true
-          
-          if (hasChecked && hasUnchecked) return 'indeterminate'
-      }
-  }
-  
-  if (hasChecked && !hasUnchecked) return true
-  if (!hasChecked && hasUnchecked) return false
-  return 'indeterminate' // Should not reach here if files exist, but default safe
+  if (!isFolder.value) return false 
+  // Read pre-calculated state from parent
+  return props.node.checkState ?? false
 })
 
 const handleFolderCheck = (v: boolean) => {
@@ -75,72 +55,85 @@ const handleNameClick = () => {
 <template>
   <div>
     <div 
-      class="flex items-center py-1 pr-2 hover:bg-muted/50 rounded group select-none"
+      class="flex hover:bg-muted/50 rounded group select-none relative"
     >
-      <div :style="{ width: paddingLeft }" class="shrink-0"></div>
-      
-      <!-- Expand Toggle -->
-      <div 
-        v-if="isFolder"
-        class="cursor-pointer p-0.5 hover:bg-muted rounded mr-1 transition-colors"
-        @click.stop="toggleExpand"
-      >
-        <ChevronDown v-if="isExpanded" class="w-4 h-4 text-muted-foreground" />
-        <ChevronRight v-else class="w-4 h-4 text-muted-foreground" />
-      </div>
-      <div v-else class="w-5 mr-1"></div>
-
-      <!-- Checkbox -->
-      <div class="mr-2 flex items-center">
-         <!-- FILE: Direct v-model binding -->
-         <Checkbox 
-           v-if="!isFolder && node.file"
-           v-model="node.file.checked"
-           class="data-[state=checked]:bg-primary data-[state=checked]:border-primary"
-         />
-         
-         <!-- FOLDER: Computed state -->
-         <Checkbox 
-           v-else
-           :checked="folderCheckState" 
-           @update:checked="handleFolderCheck"
-           class="data-[state=checked]:bg-primary data-[state=checked]:border-primary"
-         >
-            <div v-if="folderCheckState === 'indeterminate'" class="flex items-center justify-center text-current">
-                <Minus class="h-3.5 w-3.5" />
-            </div>
-         </Checkbox>
+      <!-- Spacer with Indent Guides -->
+      <div class="flex shrink-0">
+          <!-- Render guides for ancestors -->
+          <div 
+             v-for="(hasLine, i) in indentGuides" 
+             :key="i" 
+             class="w-5 relative"
+          >
+             <div v-if="hasLine" class="absolute left-2.5 top-0 bottom-0 w-px bg-border"></div>
+          </div>
+          
+          <!-- Render connector for current level -->
+          <div class="w-5 relative">
+             <!-- Vertical part: full height if not last, half height if last -->
+             <div 
+               class="absolute left-2.5 top-0 w-px bg-border"
+               :class="isLast ? 'h-1/2' : 'h-full'"
+             ></div>
+             <!-- Horizontal connector -->
+             <div class="absolute left-2.5 top-1/2 w-2.5 h-px bg-border"></div>
+          </div>
       </div>
 
-      <!-- Icon -->
-      <div class="mr-2 shrink-0">
-        <FolderOpen v-if="isFolder && isExpanded" class="w-4 h-4 text-blue-500" />
-        <Folder v-else-if="isFolder" class="w-4 h-4 text-blue-500" />
-        <FileIcon v-else class="w-4 h-4 text-muted-foreground" />
+      <!-- Content Wrapper -->
+      <div class="flex items-center py-1 pr-2 flex-1 min-w-0">
+          <!-- Expand Toggle -->
+          <div 
+            v-if="isFolder"
+            class="cursor-pointer p-0.5 hover:bg-muted rounded mr-1 transition-colors"
+            @click.stop="toggleExpand"
+          >
+            <ChevronDown v-if="isExpanded" class="w-4 h-4 text-muted-foreground" />
+            <ChevronRight v-else class="w-4 h-4 text-muted-foreground" />
+          </div>
+          <div v-else class="w-5 mr-1"></div>
+
+          <!-- Checkbox -->
+          <div class="mr-2 flex items-center">
+             <!-- FILE: Direct v-model binding -->
+             <Checkbox 
+               v-if="!isFolder && node.file"
+               v-model="node.file.checked"
+               class="data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+             />
+          </div>
+
+          <!-- Icon -->
+          <div class="mr-2 shrink-0">
+            <FolderOpen v-if="isFolder && isExpanded" class="w-4 h-4 text-blue-500" />
+            <Folder v-else-if="isFolder" class="w-4 h-4 text-blue-500" />
+            <FileIcon v-else class="w-4 h-4 text-muted-foreground" />
+          </div>
+
+          <!-- Name -->
+          <span 
+            class="text-sm truncate flex-1 cursor-pointer py-0.5" 
+            @click.stop="handleNameClick"
+          >
+            {{ node.name }}
+          </span>
+
+          <!-- Size -->
+          <span class="text-xs text-muted-foreground font-mono ml-2 shrink-0 tabular-nums">
+            {{ formatSz(node.size) }}
+          </span>
       </div>
-
-      <!-- Name -->
-      <span 
-        class="text-sm truncate flex-1 cursor-pointer py-0.5" 
-        @click.stop="handleNameClick"
-      >
-        {{ node.name }}
-      </span>
-
-      <!-- Size -->
-      <span class="text-xs text-muted-foreground font-mono ml-2 shrink-0 tabular-nums">
-        {{ formatSz(node.size) }}
-      </span>
     </div>
 
     <!-- Children -->
     <div v-if="isFolder && isExpanded">
       <FileTreeViewItem 
-        v-for="child in node.children" 
+        v-for="(child, index) in node.children" 
         :key="child.key" 
         :node="child" 
-        :level="level + 1" 
-        :expanded-keys="expandedKeys"
+        :indent-guides="[...indentGuides, !isLast]"
+        :is-last="index === node.children.length - 1"
+        :collapsed-keys="collapsedKeys"
         @toggle-expand="$emit('toggleExpand', $event)"
         @toggle-check="(n, v) => $emit('toggleCheck', n, v)"
       />

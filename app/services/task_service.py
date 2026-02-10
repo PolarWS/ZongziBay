@@ -6,6 +6,7 @@ from app.core.qb_client import QBittorrentClient
 from app.core.config import Config
 from app.schemas.task import AddTaskRequest
 from app.schemas.base import BusinessException, ErrorCode
+from app.schemas.notification import NotificationType
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ class TaskService:
             logger.info(f"[TaskService] 任务添加成功: task_id={task_id}, 已同步至 DB 和 qBittorrent")
             
             # 5. 添加通知
-            db.insert_notification(title="添加任务成功", content=f"任务 {request.taskName} 已开始下载", type="success")
+            db.insert_notification(title="添加任务成功", content=f"任务 {request.taskName} 已开始下载", type=NotificationType.SUCCESS.value)
             
             return task_id
 
@@ -189,7 +190,7 @@ class TaskService:
         db.update_file_tasks_by_download_task_id(task_id, "cancelled")
         
         # 5. 添加通知
-        db.insert_notification(title="任务已取消", content=f"任务 {task['taskName']} 已被取消", type="warning")
+        db.insert_notification(title="任务已取消", content=f"任务 {task['taskName']} 已被取消", type=NotificationType.WARNING.value)
 
         return True
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { listTasksApiV1TasksListGet, cancelTaskApiV1TasksCancelTaskIdPost } from '@/api/tasks'
 import AppPagination from '@/components/AppPagination.vue'
-import { Loader2, Ban, MoreHorizontal, Download, FolderOpen, Play, CheckCircle2, XCircle, Clock, Activity, FileText, ChevronDown } from 'lucide-vue-next'
+import { Loader2, Ban, MoreHorizontal, Download, FolderOpen, Play, CheckCircle2, XCircle, Clock, Activity, FileText, ChevronDown, AlertCircle, ArrowRight } from 'lucide-vue-next'
 import { formatFileTaskStatus } from '@/lib/status'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,9 @@ const listHeight = computed(() => `${10 * ROW_HEIGHT + HEADER_HEIGHT}px`)
 let timer: number | undefined
 const open = ref(false)
 const cancelDialogOpen = ref(false)
+const fileTaskDialogOpen = ref(false)
 const selected = ref<API.DownloadTask | null>(null)
+const selectedFileTask = ref<API.FileTask | null>(null)
 const taskToCancel = ref<API.DownloadTask | null>(null)
 
 const isPageSizeOpen = ref(false)
@@ -124,6 +126,10 @@ const confirmCancel = async () => {
     cancelDialogOpen.value = false
     taskToCancel.value = null
   }
+}
+const onOpenFileTaskDetails = (ft: API.FileTask) => {
+  selectedFileTask.value = ft
+  fileTaskDialogOpen.value = true
 }
 </script>
 <template>
@@ -377,35 +383,27 @@ const confirmCancel = async () => {
                         <tr class="text-left">
                           <th class="p-2 font-medium text-muted-foreground">源文件</th>
                           <th class="p-2 font-medium text-muted-foreground">重命名</th>
-                          <th class="p-2 font-medium text-muted-foreground">状态</th>
+                          <th class="p-2 font-medium text-muted-foreground text-center">状态</th>
                         </tr>
                       </thead>
                       <tbody class="divide-y divide-border/50">
-                        <tr v-for="ft in selected.file_tasks" :key="ft.id">
+                        <tr v-for="ft in selected.file_tasks" :key="ft.id" 
+                            class="hover:bg-muted/50 cursor-pointer transition-colors"
+                            @click="onOpenFileTaskDetails(ft)">
                           <td class="p-2 truncate max-w-[150px]" :title="ft.sourcePath">{{ ft.sourcePath }}</td>
                           <td class="p-2 truncate max-w-[150px]" :title="ft.file_rename">{{ ft.file_rename }}</td>
-                          <td class="p-2">
-                             <!-- Mobile: Dot only -->
-                             <span class="md:hidden relative flex h-2.5 w-2.5 mx-auto">
-                                <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
-                                  :class="{
-                                    'bg-green-500': ft.file_status === 'completed',
-                                    'bg-yellow-500': ['pending', 'processing'].includes(ft.file_status),
-                                    'bg-red-500': ['failed', 'cancelled'].includes(ft.file_status)
-                                  }"
-                                ></span>
-                             </span>
-                             <!-- Desktop: Badge -->
-                             <span 
-                               class="hidden md:inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                               :class="{
-                                  'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300': ft.file_status === 'completed',
-                                  'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300': ['pending', 'processing'].includes(ft.file_status),
-                                  'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300': ['failed', 'cancelled'].includes(ft.file_status)
-                               }"
-                             >
-                               {{ formatFileTaskStatus(ft.file_status) }}
-                             </span>
+                          <td class="p-2 text-center">
+                             <div class="flex justify-center" :title="formatFileTaskStatus(ft.file_status)">
+                                <span class="relative flex h-2.5 w-2.5">
+                                   <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
+                                     :class="{
+                                       'bg-green-500': ft.file_status === 'completed',
+                                       'bg-yellow-500': ['pending', 'processing'].includes(ft.file_status),
+                                       'bg-red-500': ['failed', 'cancelled'].includes(ft.file_status)
+                                     }"
+                                   ></span>
+                                </span>
+                             </div>
                           </td>
                         </tr>
                       </tbody>
@@ -424,6 +422,72 @@ const confirmCancel = async () => {
       </DialogContent>
     </Dialog>
     
+    <!-- File Task Details Dialog -->
+     <Dialog v-model:open="fileTaskDialogOpen">
+       <DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto w-[90vw] sm:w-full rounded-xl">
+         <DialogHeader>
+           <DialogTitle class="text-lg font-semibold tracking-tight">文件任务详情</DialogTitle>
+           <DialogDescription>
+             ID: {{ selectedFileTask?.id }}
+           </DialogDescription>
+         </DialogHeader>
+         
+         <div class="mt-4 grid gap-4 text-sm">
+           <div class="grid grid-cols-[100px_1fr] items-start gap-y-4 gap-x-4 p-4 rounded-lg bg-muted/30 border border-border/50">
+             
+             <!-- Source File -->
+             <span class="text-muted-foreground font-medium flex items-center gap-2">
+               <FileText class="w-4 h-4" /> 源文件
+             </span>
+             <span class="break-all font-mono text-xs">{{ selectedFileTask?.sourcePath }}</span>
+
+             <!-- Rename -->
+             <span class="text-muted-foreground font-medium flex items-center gap-2">
+               <ArrowRight class="w-4 h-4" /> 重命名
+             </span>
+             <span class="break-all font-mono text-xs">{{ selectedFileTask?.file_rename }}</span>
+
+             <!-- Target Path -->
+             <span class="text-muted-foreground font-medium flex items-center gap-2">
+               <FolderOpen class="w-4 h-4" /> 目标路径
+             </span>
+             <span class="break-all font-mono text-xs">{{ selectedFileTask?.targetPath || '-' }}</span>
+
+             <!-- Status -->
+             <span class="text-muted-foreground font-medium flex items-center gap-2">
+               <Activity class="w-4 h-4" /> 状态
+             </span>
+             <span class="flex items-center gap-2">
+                <span class="relative flex h-2.5 w-2.5">
+                   <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
+                     :class="{
+                       'bg-green-500': selectedFileTask?.file_status === 'completed',
+                       'bg-yellow-500': ['pending', 'processing'].includes(selectedFileTask?.file_status || ''),
+                       'bg-red-500': ['failed', 'cancelled'].includes(selectedFileTask?.file_status || '')
+                     }"
+                   ></span>
+                </span>
+                <span class="capitalize font-mono">{{ formatFileTaskStatus(selectedFileTask?.file_status) }}</span>
+             </span>
+
+             <!-- Update Time -->
+             <span class="text-muted-foreground font-medium flex items-center gap-2">
+               <Clock class="w-4 h-4" /> 更新时间
+             </span>
+             <span class="font-mono text-xs">{{ selectedFileTask?.updateTime }}</span>
+
+             <!-- Error Message -->
+             <template v-if="selectedFileTask?.errorMessage">
+                <span class="text-destructive font-medium flex items-center gap-2">
+                  <AlertCircle class="w-4 h-4" /> 错误信息
+                </span>
+                <span class="text-destructive font-mono text-xs break-all">{{ selectedFileTask?.errorMessage }}</span>
+             </template>
+           </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
     <!-- Cancel Confirmation -->
     <Dialog v-model:open="cancelDialogOpen">
       <DialogContent class="max-w-sm">
