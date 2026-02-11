@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button'
-import { ChevronLeft, Home, Settings, User } from 'lucide-vue-next'
+import { ChevronLeft, Home, LogOut, Settings } from 'lucide-vue-next'
 import NotificationBell from '@/components/NotificationBell.vue'
 
 const router = useRouter()
 const route = useRoute()
 const isHome = computed(() => route.path === '/')
+const { logout } = useAuth()
 </script>
 
 <template>
@@ -27,9 +28,9 @@ const isHome = computed(() => route.path === '/')
         <div class="flex-1" />
         <div class="flex items-center gap-2">
           <NotificationBell />
-          <Button variant="ghost" size="icon">
-            <User class="h-5 w-5" />
-            <span class="sr-only">User</span>
+          <Button variant="ghost" size="icon" @click="logout">
+            <LogOut class="h-5 w-5" />
+            <span class="sr-only">退出登录</span>
           </Button>
           <Button variant="ghost" size="icon">
             <Settings class="h-5 w-5" />
