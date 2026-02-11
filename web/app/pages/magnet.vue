@@ -1,371 +1,3 @@
-<script setup lang="ts">
-import { parseMagnetApiV1MagnetParsePost } from '@/api/magnet'
-import { addTaskApiV1TasksAddPost } from '@/api/tasks'
-import { getPathConfigApiV1SystemPathsGet as getSystemPaths } from '@/api/system'
-import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
-import AppEmpty from '@/components/AppEmpty.vue'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { 
-  ArrowUpCircle, 
-  ArrowDownCircle, 
-  HardDrive, 
-  Files, 
-  User, 
-  Clock, 
-  Tag, 
-  Film, 
-  Magnet,
-  Settings,
-  FolderOpen,
-  List,
-  FolderTree
-} from 'lucide-vue-next'
-
-import { performSmartRename, getExt } from '@/lib/renamer'
-import FileTreeView from '@/components/FileTreeView.vue'
-
-const route = useRoute()
-const router = useRouter()
-
-const magnet = computed(() => (route.query.magnet as string) || '')
-const tmdbName = computed(() => (route.query.tmdbName as string) || '')
-
-const category = computed(() => (route.query.category as string) || '')
-const defaultType = computed(() => {
-  // 205 = TV shows, 208 = HD - TV shows
-  if (['205', '208'].includes(category.value)) {
-    return 'tv'
-  }
-  return 'movie'
-})
-const selectedType = ref('movie')
-const customSourcePath = ref('')
-const customTargetPath = ref('')
-const viewMode = ref<'list' | 'tree'>('list')
-
-watch(defaultType, (v) => {
-  selectedType.value = v
-}, { immediate: true })
-
-const info = computed(() => ({
-    name: (route.query.name as string) || '',
-    size: (route.query.size as string) || '',
-    seeders: (route.query.seeders as string) || '',
-    leechers: (route.query.leechers as string) || '',
-    num_files: (route.query.num_files as string) || '',
-    username: (route.query.username as string) || '',
-    added: (route.query.added as string) || '',
-    category: category.value,
-    imdb: (route.query.imdb as string) || '',
-  }))
-
-const loading = ref(false)
-const errMsg = ref<string | null>(null)
-const files = ref<(API.MagnetFile & { newName: string; checked: boolean })[]>([])
-
-const defaultCheckedExts = [
-  '.mp4',
-  '.mkv',
-  '.webm',
-  '.mov',
-  '.flv',
-  '.m4v',
-  '.avi',
-  // Subtitles are handled separately logic
-  // '.srt',
-  // '.ass',
-  // '.ssa',
-  // '.vtt',
-  // '.sub',
-  // '.idx',
-]
-
-const formatFileSize = (size: number) => {
-  if (!Number.isFinite(size) || size <= 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  let v = size
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(2)} ${units[i]}`
-}
-
-const fetchFiles = async () => {
-  const link = magnet.value.trim()
-  if (!link) return
-  loading.value = true
-  errMsg.value = null
-  // Clear history when fetching new files
-  history.value = []
-  try {
-    const res = await parseMagnetApiV1MagnetParsePost({ magnet_link: link })
-    const code = (res as any)?.code ?? 0
-    const msg = (res as any)?.message ?? ''
-    const data = (res as any)?.data ?? null
-    const ok = code === 0 || code === 200
-    if (!ok) {
-      errMsg.value = msg || '解析失败'
-      files.value = []
-    } else {
-      errMsg.value = null
-      const list = Array.isArray((data as any)?.files) ? (data as any).files : []
-      
-      files.value = list.map((it: API.MagnetFile) => {
-        const ext = getExt(it.name || it.path || '')
-        const name = it.name || it.path || ''
-        
-        let checked = defaultCheckedExts.includes(ext)
-        
-        // Logic for subtitle selection: default only select Chinese
-        const subExts = ['.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx']
-        if (subExts.includes(ext)) {
-            // Check if it contains Chinese keywords
-            if (name.includes('Chinese') || name.includes('中文') || name.includes('CHS') || name.includes('CHT')) {
-                checked = true
-            } else {
-                checked = false
-            }
-        }
-        
-        return {
-          ...it,
-          newName: tmdbName.value ? `${tmdbName.value}/${it.name}` : it.name,
-          checked,
-        }
-      })
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
-const onConfirm = async () => {
-  if (loading.value) return
-  const link = magnet.value.trim()
-  if (!link) return
-
-  loading.value = true
-  errMsg.value = null
-
-  try {
-    const selectedFiles = files.value.filter(f => f.checked)
-    const fileTasks = selectedFiles.map(f => {
-      const newName = f.newName || f.name || ''
-      const idx1 = newName.lastIndexOf('/')
-      const idx2 = newName.lastIndexOf('\\')
-      const idx = Math.max(idx1, idx2)
-      const targetPath = idx >= 0 ? newName.slice(0, idx) : ''
-      const fileRename = idx >= 0 ? newName.slice(idx + 1) : newName
-      return {
-        sourcePath: f.path || f.name || '',
-        targetPath,
-        file_rename: fileRename
-      }
-    })
-
-    const req: API.AddTaskRequest = {
-      taskName: info.value.name || '未命名任务',
-      sourceUrl: link,
-      file_tasks: fileTasks,
-      type: selectedType.value,
-      sourcePath: customSourcePath.value || undefined,
-      targetPath: customTargetPath.value || undefined
-    }
-
-    const res = await addTaskApiV1TasksAddPost(req)
-    if (res && (res.code === 0 || res.code === 200)) {
-      router.push('/')
-    } else {
-      errMsg.value = res?.message || '添加任务失败'
-    }
-  } catch (e: any) {
-    errMsg.value = e.message || '添加任务发生错误'
-  } finally {
-    loading.value = false
-  }
-}
-
-const onCancel = () => {
-  router.back()
-}
-
-const systemPaths = ref<any>({})
-
-const fetchPaths = async () => {
-  try {
-    const res = await getSystemPaths()
-    if (res && res.code === 200) {
-      systemPaths.value = res.data || {}
-    }
-  } catch (e) {
-    console.error(e)
-  }
-}
-
-const currentPaths = computed(() => {
-    const type = selectedType.value
-    if (type === 'tv') {
-        return {
-            download: systemPaths.value.tv_download_path || systemPaths.value.default_download_path,
-            target: systemPaths.value.tv_target_path || systemPaths.value.default_target_path
-        }
-    } else if (type === 'movie') {
-        return {
-            download: systemPaths.value.movie_download_path || systemPaths.value.default_download_path,
-            target: systemPaths.value.movie_target_path || systemPaths.value.default_target_path
-        }
-    }
-    return {
-        download: systemPaths.value.default_download_path,
-        target: systemPaths.value.default_target_path
-    }
-})
-
-onMounted(() => {
-  fetchFiles()
-  fetchPaths()
-})
-
-// --- History / Undo ---
-const history = ref<string[]>([])
-
-const saveHistory = () => {
-  // Limit history stack size if needed, here just push
-  history.value.push(JSON.stringify(files.value))
-}
-
-const undo = () => {
-  const last = history.value.pop()
-  if (last) {
-    const restored = JSON.parse(last)
-    // Only restore names, keep current selection
-    if (Array.isArray(restored) && restored.length === files.value.length) {
-      files.value.forEach((f, i) => {
-        f.newName = restored[i].newName
-      })
-    } else {
-      // Fallback if structure changed (shouldn't happen usually)
-      files.value = restored
-    }
-  }
-}
-
-const canUndo = computed(() => history.value.length > 0)
-
-// --- Selection / Extensions ---
-const extensions = computed(() => {
-  const extMap = new Map<string, { count: number; checked: number }>()
-  
-  files.value.forEach(f => {
-    const ext = getExt(f.name || f.path || '')
-    if (!ext) return
-    
-    const existing = extMap.get(ext) || { count: 0, checked: 0 }
-    existing.count++
-    if (f.checked) existing.checked++
-    extMap.set(ext, existing)
-  })
-
-  return Array.from(extMap.entries()).map(([ext, stats]) => ({
-    ext,
-    ...stats,
-    allChecked: stats.checked === stats.count,
-    someChecked: stats.checked > 0 && stats.checked < stats.count
-  })).sort((a, b) => b.count - a.count)
-})
-
-const toggleExtension = (ext: string) => {
-  // Do not save history for selection changes
-  const target = extensions.value.find(e => e.ext === ext)
-  if (!target) return
-
-  // If all checked, uncheck all. Otherwise check all.
-  const newValue = !target.allChecked
-  
-  files.value.forEach(f => {
-    if (getExt(f.name || f.path || '') === ext) {
-      f.checked = newValue
-    }
-  })
-}
-
-// --- Keyword Selection ---
-const commonKeywords = [
-  'Chinese', '中文', 'CHS', 'CHT', 'English', 'Korean', 'Japanese', 
-  '1080p', '2160p', '4K', 'HDR', 'HEVC', 'x265', 'x264'
-]
-
-const customKeywords = ref<string[]>([])
-const newKeyword = ref('')
-
-const addCustomKeyword = () => {
-  const val = newKeyword.value.trim()
-  if (!val) return
-  if (!commonKeywords.includes(val) && !customKeywords.value.includes(val)) {
-    customKeywords.value.push(val)
-  }
-  newKeyword.value = ''
-}
-
-const removeCustomKeyword = (keyword: string) => {
-  customKeywords.value = customKeywords.value.filter(k => k !== keyword)
-}
-
-const detectedKeywords = computed(() => {
-  // Merge common and custom keywords
-  const allKeywords = [...new Set([...commonKeywords, ...customKeywords.value])]
-
-  const result = allKeywords.map(k => ({
-    keyword: k,
-    isCustom: customKeywords.value.includes(k),
-    count: 0,
-    checked: 0
-  }))
-
-  files.value.forEach(f => {
-    const name = f.name || f.path || ''
-    result.forEach(item => {
-      if (name.toLowerCase().includes(item.keyword.toLowerCase())) {
-        item.count++
-        if (f.checked) item.checked++
-      }
-    })
-  })
-
-  // Show keywords that have matches OR are custom added by user
-  return result.filter(item => item.count > 0 || item.isCustom).map(item => ({
-    ...item,
-    allChecked: item.checked === item.count && item.count > 0,
-    someChecked: item.checked > 0 && item.checked < item.count
-  }))
-})
-
-const toggleKeyword = (keyword: string) => {
-  const target = detectedKeywords.value.find(k => k.keyword === keyword)
-  if (!target) return
-  
-  const newValue = !target.allChecked
-  files.value.forEach(f => {
-    const name = f.name || f.path || ''
-    if (name.toLowerCase().includes(keyword.toLowerCase())) {
-      f.checked = newValue
-    }
-  })
-}
-
-const smartRename = () => {
-  saveHistory() // Save state before rename
-  performSmartRename(files.value, selectedType.value as 'movie' | 'tv', tmdbName.value || info.value.name)
-}
-</script>
-
 <template>
   <div class="px-2 md:px-0">
     <div class="flex items-center justify-between mb-4">
@@ -652,3 +284,359 @@ const smartRename = () => {
     </div>
   </div>
 </template>
+
+<script setup lang="ts">
+import { parseMagnetApiV1MagnetParsePost } from '@/api/magnet'
+import { addTaskApiV1TasksAddPost } from '@/api/tasks'
+import { getPathConfigApiV1SystemPathsGet as getSystemPaths } from '@/api/system'
+import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
+import AppEmpty from '@/components/AppEmpty.vue'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { 
+  ArrowUpCircle, 
+  ArrowDownCircle, 
+  HardDrive, 
+  Files, 
+  User, 
+  Clock, 
+  Tag, 
+  Film, 
+  Magnet,
+  Settings,
+  FolderOpen,
+  List,
+  FolderTree
+} from 'lucide-vue-next'
+
+import { performSmartRename, getExt } from '@/lib/renamer'
+import FileTreeView from '@/components/FileTreeView.vue'
+
+const route = useRoute()
+const router = useRouter()
+
+// ref / reactive 声明
+const selectedType = ref('movie')
+const customSourcePath = ref('')
+const customTargetPath = ref('')
+const viewMode = ref<'list' | 'tree'>('list')
+const loading = ref(false)
+const errMsg = ref<string | null>(null)
+const files = ref<(API.MagnetFile & { newName: string; checked: boolean })[]>([])
+const systemPaths = ref<any>({})
+const history = ref<string[]>([])
+const customKeywords = ref<string[]>([])
+const newKeyword = ref('')
+
+// 默认勾选的视频扩展名，字幕按单独逻辑处理
+const defaultCheckedExts = [
+  '.mp4',
+  '.mkv',
+  '.webm',
+  '.mov',
+  '.flv',
+  '.m4v',
+  '.avi',
+]
+
+// 常见关键词（用于批量勾选/取消）
+const commonKeywords = [
+  'Chinese', '中文', 'CHS', 'CHT', 'English', 'Korean', 'Japanese', 
+  '1080p', '2160p', '4K', 'HDR', 'HEVC', 'x265', 'x264'
+]
+
+// computed
+const magnet = computed(() => (route.query.magnet as string) || '')
+const tmdbName = computed(() => (route.query.tmdbName as string) || '')
+const category = computed(() => (route.query.category as string) || '')
+const defaultType = computed(() => {
+  // 205 = 剧集, 208 = 高清剧集
+  if (['205', '208'].includes(category.value)) {
+    return 'tv'
+  }
+  return 'movie'
+})
+const info = computed(() => ({
+    name: (route.query.name as string) || '',
+    size: (route.query.size as string) || '',
+    seeders: (route.query.seeders as string) || '',
+    leechers: (route.query.leechers as string) || '',
+    num_files: (route.query.num_files as string) || '',
+    username: (route.query.username as string) || '',
+    added: (route.query.added as string) || '',
+    category: category.value,
+    imdb: (route.query.imdb as string) || '',
+  }))
+const currentPaths = computed(() => {
+    const type = selectedType.value
+    if (type === 'tv') {
+        return {
+            download: systemPaths.value.tv_download_path || systemPaths.value.default_download_path,
+            target: systemPaths.value.tv_target_path || systemPaths.value.default_target_path
+        }
+    } else if (type === 'movie') {
+        return {
+            download: systemPaths.value.movie_download_path || systemPaths.value.default_download_path,
+            target: systemPaths.value.movie_target_path || systemPaths.value.default_target_path
+        }
+    }
+    return {
+        download: systemPaths.value.default_download_path,
+        target: systemPaths.value.default_target_path
+    }
+})
+const canUndo = computed(() => history.value.length > 0)
+const extensions = computed(() => {
+  const extMap = new Map<string, { count: number; checked: number }>()
+  
+  files.value.forEach(f => {
+    const ext = getExt(f.name || f.path || '')
+    if (!ext) return
+    
+    const existing = extMap.get(ext) || { count: 0, checked: 0 }
+    existing.count++
+    if (f.checked) existing.checked++
+    extMap.set(ext, existing)
+  })
+
+  return Array.from(extMap.entries()).map(([ext, stats]) => ({
+    ext,
+    ...stats,
+    allChecked: stats.checked === stats.count,
+    someChecked: stats.checked > 0 && stats.checked < stats.count
+  })).sort((a, b) => b.count - a.count)
+})
+const detectedKeywords = computed(() => {
+  const allKeywords = [...new Set([...commonKeywords, ...customKeywords.value])]
+
+  const result = allKeywords.map(k => ({
+    keyword: k,
+    isCustom: customKeywords.value.includes(k),
+    count: 0,
+    checked: 0
+  }))
+
+  files.value.forEach(f => {
+    const name = f.name || f.path || ''
+    result.forEach(item => {
+      if (name.toLowerCase().includes(item.keyword.toLowerCase())) {
+        item.count++
+        if (f.checked) item.checked++
+      }
+    })
+  })
+
+  // 仅展示有匹配或用户自定义添加的关键词
+  return result.filter(item => item.count > 0 || item.isCustom).map(item => ({
+    ...item,
+    allChecked: item.checked === item.count && item.count > 0,
+    someChecked: item.checked > 0 && item.checked < item.count
+  }))
+})
+
+// watch
+watch(defaultType, (v) => {
+  selectedType.value = v
+}, { immediate: true })
+
+// 生命周期
+onMounted(() => {
+  fetchFiles()
+  fetchPaths()
+})
+
+// 格式化文件大小
+const formatFileSize = (size: number) => {
+  if (!Number.isFinite(size) || size <= 0) return '—'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0
+  let v = size
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(2)} ${units[i]}`
+}
+
+// 解析磁链获取文件列表
+const fetchFiles = async () => {
+  const link = magnet.value.trim()
+  if (!link) return
+  loading.value = true
+  errMsg.value = null
+  history.value = []
+  try {
+    const res = await parseMagnetApiV1MagnetParsePost({ magnet_link: link })
+    const code = (res as any)?.code ?? 0
+    const msg = (res as any)?.message ?? ''
+    const data = (res as any)?.data ?? null
+    const ok = code === 0 || code === 200
+    if (!ok) {
+      errMsg.value = msg || '解析失败'
+      files.value = []
+    } else {
+      errMsg.value = null
+      const list = Array.isArray((data as any)?.files) ? (data as any).files : []
+      
+      files.value = list.map((it: API.MagnetFile) => {
+        const ext = getExt(it.name || it.path || '')
+        const name = it.name || it.path || ''
+        
+        let checked = defaultCheckedExts.includes(ext)
+        
+        // 字幕选择逻辑：默认仅勾选中文
+        const subExts = ['.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx']
+        if (subExts.includes(ext)) {
+            if (name.includes('Chinese') || name.includes('中文') || name.includes('CHS') || name.includes('CHT')) {
+                checked = true
+            } else {
+                checked = false
+            }
+        }
+        
+        return {
+          ...it,
+          newName: tmdbName.value ? `${tmdbName.value}/${it.name}` : it.name,
+          checked,
+        }
+      })
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+// 获取系统路径配置
+const fetchPaths = async () => {
+  try {
+    const res = await getSystemPaths()
+    if (res && res.code === 200) {
+      systemPaths.value = res.data || {}
+    }
+  } catch (e) {
+    console.error(e)
+  }
+}
+
+// 撤销：恢复到上一次重命名前的状态
+const saveHistory = () => {
+  history.value.push(JSON.stringify(files.value))
+}
+
+const undo = () => {
+  const last = history.value.pop()
+  if (last) {
+    const restored = JSON.parse(last)
+    if (Array.isArray(restored) && restored.length === files.value.length) {
+      files.value.forEach((f, i) => {
+        f.newName = restored[i].newName
+      })
+    } else {
+      files.value = restored
+    }
+  }
+}
+
+// 按扩展名批量勾选/取消
+const toggleExtension = (ext: string) => {
+  const target = extensions.value.find(e => e.ext === ext)
+  if (!target) return
+
+  const newValue = !target.allChecked
+  
+  files.value.forEach(f => {
+    if (getExt(f.name || f.path || '') === ext) {
+      f.checked = newValue
+    }
+  })
+}
+
+// 自定义关键词管理
+const addCustomKeyword = () => {
+  const val = newKeyword.value.trim()
+  if (!val) return
+  if (!commonKeywords.includes(val) && !customKeywords.value.includes(val)) {
+    customKeywords.value.push(val)
+  }
+  newKeyword.value = ''
+}
+
+const removeCustomKeyword = (keyword: string) => {
+  customKeywords.value = customKeywords.value.filter(k => k !== keyword)
+}
+
+// 按关键词批量勾选/取消
+const toggleKeyword = (keyword: string) => {
+  const target = detectedKeywords.value.find(k => k.keyword === keyword)
+  if (!target) return
+  
+  const newValue = !target.allChecked
+  files.value.forEach(f => {
+    const name = f.name || f.path || ''
+    if (name.toLowerCase().includes(keyword.toLowerCase())) {
+      f.checked = newValue
+    }
+  })
+}
+
+// 智能重命名
+const smartRename = () => {
+  saveHistory()
+  performSmartRename(files.value, selectedType.value as 'movie' | 'tv', tmdbName.value || info.value.name)
+}
+
+// 确认添加任务
+const onConfirm = async () => {
+  if (loading.value) return
+  const link = magnet.value.trim()
+  if (!link) return
+
+  loading.value = true
+  errMsg.value = null
+
+  try {
+    const selectedFiles = files.value.filter(f => f.checked)
+    const fileTasks = selectedFiles.map(f => {
+      const newName = f.newName || f.name || ''
+      const idx1 = newName.lastIndexOf('/')
+      const idx2 = newName.lastIndexOf('\\')
+      const idx = Math.max(idx1, idx2)
+      const targetPath = idx >= 0 ? newName.slice(0, idx) : ''
+      const fileRename = idx >= 0 ? newName.slice(idx + 1) : newName
+      return {
+        sourcePath: f.path || f.name || '',
+        targetPath,
+        file_rename: fileRename
+      }
+    })
+
+    const req: API.AddTaskRequest = {
+      taskName: info.value.name || '未命名任务',
+      sourceUrl: link,
+      file_tasks: fileTasks,
+      type: selectedType.value,
+      sourcePath: customSourcePath.value || undefined,
+      targetPath: customTargetPath.value || undefined
+    }
+
+    const res = await addTaskApiV1TasksAddPost(req)
+    if (res && (res.code === 0 || res.code === 200)) {
+      router.push('/')
+    } else {
+      errMsg.value = res?.message || '添加任务失败'
+    }
+  } catch (e: any) {
+    errMsg.value = e.message || '添加任务发生错误'
+  } finally {
+    loading.value = false
+  }
+}
+
+const onCancel = () => {
+  router.back()
+}
+</script>

@@ -1,7 +1,9 @@
 from fastapi import APIRouter
+
 from app.schemas.base import BaseResponse
 
 router = APIRouter()
+
 
 @router.get("", response_model=BaseResponse, summary="服务健康检查")
 async def health_check():

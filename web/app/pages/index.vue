@@ -1,14 +1,3 @@
-<script setup lang="ts">
-import Search from '@/components/search.vue'
-import { Button } from '@/components/ui/button'
-import { Activity, ExternalLink } from 'lucide-vue-next'
-
-const type = ref<'movie' | 'tv'>('tv')
-const onChangeType = (v: 'movie' | 'tv') => {
-  type.value = v
-}
-</script>
-
 <template>
     <div class="flex flex-col items-center justify-center pt-20 pb-20 relative z-30">
         <!-- Hero Section -->
@@ -83,3 +72,15 @@ const onChangeType = (v: 'movie' | 'tv') => {
         </div>
     </div>
 </template>
+
+<script setup lang="ts">
+import Search from '@/components/search.vue'
+import { Button } from '@/components/ui/button'
+import { Activity, ExternalLink } from 'lucide-vue-next'
+
+// 当前搜索类型（电影/剧集）
+const type = ref<'movie' | 'tv'>('tv')
+const onChangeType = (v: 'movie' | 'tv') => {
+  type.value = v
+}
+</script>

@@ -1,5 +1,6 @@
 # General
 .DS_Store
+.cursor/
 Thumbs.db
 .idea/
 .vscode/

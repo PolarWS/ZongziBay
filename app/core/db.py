@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.core.config import Config
+from app.core.config import config
 from app.schemas.notification import NotificationType
 
 logger = logging.getLogger(__name__)
@@ -16,8 +16,7 @@ class Database:
     """
 
     def __init__(self):
-        cfg = Config()
-        db_cfg = cfg.get("database", {})
+        db_cfg = config.get("database", {})
         path_cfg = db_cfg.get("path", "Zongzibay.db")
         root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.db_path = path_cfg if os.path.isabs(path_cfg) else os.path.join(root_dir, path_cfg)
@@ -38,15 +37,12 @@ class Database:
         初始化数据库
         如果表不存在，则从 create_table.sql 创建
         """
-        # 检查表是否已存在，简单判断 download_task 表
         conn = self.get_conn()
         cur = conn.cursor()
         try:
             cur.execute("SELECT 1 FROM download_task LIMIT 1")
-            # 如果没有报错，说明表存在，不需要重新初始化
             return
         except sqlite3.OperationalError:
-            # 表不存在，执行初始化脚本
             pass
 
         if os.path.exists(self.schema_path):
@@ -60,10 +56,6 @@ class Database:
                 logger.error(f"数据库初始化失败: {e}")
         else:
             logger.error(f"未找到数据库初始化脚本: {self.schema_path}")
-
-    # -------------------------------------------------------------------------
-    # 下载任务相关操作 (Download Task)
-    # -------------------------------------------------------------------------
 
     def insert_download_task(
         self, 
@@ -101,16 +93,12 @@ class Database:
         # Count total
         cur.execute("SELECT COUNT(*) FROM download_task WHERE isDelete = 0")
         total = cur.fetchone()[0]
-
-        # Query items
         cur.execute(
             "SELECT * FROM download_task WHERE isDelete = 0 ORDER BY createTime DESC LIMIT ? OFFSET ?",
             (page_size, offset)
         )
         rows = cur.fetchall()
         tasks = [dict(row) for row in rows]
-        
-        # Attach file_tasks
         for task in tasks:
             cur.execute("SELECT * FROM file_task WHERE downloadTaskId = ?", (task['id'],))
             ft_rows = cur.fetchall()
@@ -167,10 +155,6 @@ class Database:
                 (status, now, task_id),
             )
         conn.commit()
-
-    # -------------------------------------------------------------------------
-    # 文件操作任务相关 (File Task)
-    # -------------------------------------------------------------------------
 
     def insert_file_task(
         self, 
@@ -234,10 +218,6 @@ class Database:
         )
         conn.commit()
 
-    # -------------------------------------------------------------------------
-    # 通知相关操作 (Notification)
-    # -------------------------------------------------------------------------
-
     def insert_notification(
         self,
         title: str,
@@ -266,12 +246,8 @@ class Database:
         if is_read is not None:
             where_clause += " AND isRead = ?"
             params.append(1 if is_read else 0)
-            
-        # Count
         cur.execute(f"SELECT COUNT(*) FROM notification WHERE {where_clause}", params)
         total = cur.fetchone()[0]
-        
-        # Query
         cur.execute(
             f"SELECT * FROM notification WHERE {where_clause} ORDER BY createTime DESC LIMIT ? OFFSET ?",
             params + [page_size, offset]
@@ -310,10 +286,9 @@ class Database:
         conn.commit()
         return cur.rowcount > 0
 
-# 单例实例
+
 db = Database()
 
-# 导出方法别名 (为了兼容现有代码)
 init_db = db.init_db
 insert_download_task = db.insert_download_task
 insert_file_task = db.insert_file_task
@@ -324,7 +299,6 @@ get_file_tasks = db.get_file_tasks
 update_file_task_status = db.update_file_task_status
 update_file_tasks_by_download_task_id = db.update_file_tasks_by_download_task_id
 
-# Notification exports
 insert_notification = db.insert_notification
 get_notifications = db.get_notifications
 mark_notification_read = db.mark_notification_read

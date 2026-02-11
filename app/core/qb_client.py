@@ -1,11 +1,16 @@
-import requests
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
+import requests
+
 from app.schemas.base import BusinessException, ErrorCode
 
 logger = logging.getLogger(__name__)
 
+
 class QBittorrentClient:
+    """qBittorrent Web API 客户端"""
+
     def __init__(self, host, username, password):
         self.host = host.rstrip('/')
         self.username = username
@@ -14,17 +19,12 @@ class QBittorrentClient:
         self.authenticated = False
 
     def login(self) -> bool:
-        """
-        登录到 qBittorrent
-        """
+        """登录到 qBittorrent"""
         url = f"{self.host}/api/v2/auth/login"
         data = {'username': self.username, 'password': self.password}
         try:
-            # 某些版本可能需要 Referer
             headers = {'Referer': self.host}
             response = self.session.post(url, data=data, headers=headers, timeout=10)
-            
-            # qBittorrent 返回 200 OK 即使登录失败（此时 body 是 "Fails."）
             if response.status_code == 200:
                 if "Ok." in response.text:
                     self.authenticated = True
@@ -33,15 +33,10 @@ class QBittorrentClient:
                     logger.error("qBittorrent 登录失败: 用户名或密码错误")
                     return False
                 else:
-                    # 其他情况，虽然是 200，但可能也是失败
                     logger.warning(f"qBittorrent 登录响应未知内容: {response.text}")
-                    # 尝试继续，看是否其实已经登录
-                    # 或者返回 False 保守起见
                     return False
-
             elif response.status_code == 403:
                 logger.error(f"qBittorrent 登录被拒绝 (IP 可能被封禁): {response.text}")
-                # 抛出特定异常以便上层捕获
                 raise BusinessException(code=ErrorCode.SYSTEM_ERROR, message=f"qBittorrent IP被封禁: {response.text}")
             else:
                 logger.error(f"qBittorrent 登录失败: 状态码 {response.status_code}, 响应: {response.text}")
@@ -53,18 +48,10 @@ class QBittorrentClient:
             return False
 
     def ensure_logged_in(self):
-        """确保已登录，如果未登录则尝试登录"""
+        """确保已登录，未登录则尝试登录"""
         if not self.authenticated:
             if not self.login():
                 raise BusinessException(code=ErrorCode.SYSTEM_ERROR, message="无法登录到 qBittorrent")
-
-    def get_version(self) -> str:
-        """获取 qBittorrent 版本"""
-        self.ensure_logged_in()
-        url = f"{self.host}/api/v2/app/version"
-        response = self.session.get(url, timeout=10)
-        response.raise_for_status()
-        return response.text
 
     def add_torrent(self, urls: str, is_paused: bool = False, save_path: str = None) -> bool:
         """添加种子"""
@@ -101,11 +88,7 @@ class QBittorrentClient:
         return response.json()
 
     def delete_torrents(self, hashes: str, delete_files: bool = True) -> bool:
-        """
-        删除种子
-        :param hashes: 种子 Hash，多个用 | 分隔
-        :param delete_files: 是否同时删除文件
-        """
+        """删除种子，多个 Hash 用 | 分隔"""
         self.ensure_logged_in()
         url = f"{self.host}/api/v2/torrents/delete"
         data = {
@@ -116,13 +99,9 @@ class QBittorrentClient:
         return response.status_code == 200
 
     def set_file_priority(self, torrent_hash: str, file_ids: List[int], priority: int) -> bool:
-        """
-        设置文件优先级
-        priority: 0=Do not download, 1=Normal, 6=High, 7=Maximal
-        """
+        """设置文件优先级，0=不下载 1=普通 6=高 7=最高"""
         self.ensure_logged_in()
         url = f"{self.host}/api/v2/torrents/filePrio"
-        # file_ids is a list of integers, join them with |
         id_str = "|".join(map(str, file_ids))
         data = {
             'hash': torrent_hash,
@@ -147,6 +126,14 @@ class QBittorrentClient:
         data = {'hashes': hashes}
         response = self.session.post(url, data=data, timeout=10)
         return response.status_code == 200
+
+    def get_version(self) -> str:
+        """获取 qBittorrent 版本"""
+        self.ensure_logged_in()
+        url = f"{self.host}/api/v2/app/version"
+        response = self.session.get(url, timeout=10)
+        response.raise_for_status()
+        return response.text
 
     def rename_file(self, torrent_hash: str, old_path: str, new_path: str) -> bool:
         """重命名文件"""
@@ -173,7 +160,7 @@ class QBittorrentClient:
         return response.status_code == 200
 
     def set_location(self, hashes: str, location: str) -> bool:
-        """设置保存位置 (移动文件)"""
+        """设置保存位置（移动文件）"""
         self.ensure_logged_in()
         url = f"{self.host}/api/v2/torrents/setLocation"
         data = {
