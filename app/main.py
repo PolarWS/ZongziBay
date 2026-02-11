@@ -1,12 +1,19 @@
+import logging
+import mimetypes
+import os
+import sys
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import logging
-import sys
-import os
-import mimetypes
+
+from app.api.v1.api import api_router
+from app.core import db
+from app.core.auth_middleware import JWTAuthMiddleware
+from app.core.handlers import register_exception_handlers
+from app.services.task_monitor import task_monitor
 
 # 修复 Windows 下 MIME 类型可能不正确的问题
 mimetypes.add_type("application/javascript", ".js")
@@ -20,19 +27,16 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-from app.core import db
-from app.core.handlers import register_exception_handlers
-from app.api.v1.api import api_router
-from app.services.task_monitor import task_monitor
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # 启动：初始化数据库并启动任务监控
     db.init_db()
     task_monitor.start()
     yield
-    # Shutdown
+    # 关闭：停止任务监控
     task_monitor.stop()
+
 
 app = FastAPI(
     title="ZongziBay",
@@ -50,12 +54,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# JWT 认证中间件（放在 CORS 之后注册，确保 CORS 在外层优先处理预检请求）
+app.add_middleware(JWTAuthMiddleware)
+
 # 注册全局异常处理器
 register_exception_handlers(app)
 
 # 注册路由
 app.include_router(api_router, prefix="/api/v1")
-
 
 # 静态文件服务配置
 # 获取项目根目录 (app/main.py -> app/ -> root)
@@ -95,7 +101,6 @@ if os.path.isdir(static_dir):
             return FileResponse(index_path)
             
         raise HTTPException(status_code=404, detail="Not Found")
-
 
 
 if __name__ == "__main__":
