@@ -1,11 +1,14 @@
-from fastapi import APIRouter, HTTPException, Query
-from typing import List, Optional
+from typing import List
+
+from fastapi import APIRouter, Query
+
+from app.schemas.base import BaseResponse, ErrorCode
 from app.schemas.piratebay import PirateBayTorrent
 from app.services.piratebay_service import PirateBayService
-from app.schemas.base import BaseResponse, ErrorCode
 
 router = APIRouter()
 service = PirateBayService()
+
 
 @router.get("/search", response_model=BaseResponse[List[PirateBayTorrent]], summary="搜索海盗湾")
 async def search_torrents(

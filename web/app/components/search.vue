@@ -62,7 +62,7 @@ const submit = () => {
         <Search :size="20" :stroke-width="2" />
       </div>
       <button
-        class="absolute inset-y-1 end-1 flex h-12 w-12 items-center justify-center rounded-lg text-muted-foreground/80 transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        class="absolute inset-y-1 end-1 flex h-12 w-12 items-center justify-center rounded-lg text-muted-foreground/80 transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 cursor-pointer"
         aria-label="Submit search"
         type="submit"
       >

@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Query, Body
+from fastapi import APIRouter, Body, Query
+
 from app.core.db import get_download_tasks
 from app.schemas.base import BaseResponse
-from app.schemas.task import TaskListResponse, AddTaskRequest
+from app.schemas.task import AddTaskRequest, TaskListResponse
 from app.services.task_service import task_service
 
 router = APIRouter()
+
 
 @router.post("/add", response_model=BaseResponse[int], summary="添加下载任务")
 async def add_task(request: AddTaskRequest = Body(...)):
@@ -16,6 +18,7 @@ async def add_task(request: AddTaskRequest = Body(...)):
     task_id = task_service.add_task(request)
     return BaseResponse.success(data=task_id)
 
+
 @router.get("/list", response_model=BaseResponse[TaskListResponse], summary="获取任务列表")
 async def list_tasks(
     page: int = Query(1, ge=1, description="页码"),
@@ -26,6 +29,7 @@ async def list_tasks(
     """
     tasks, total = get_download_tasks(page, page_size)
     return BaseResponse.success(data=TaskListResponse(total=total, items=tasks))
+
 
 @router.post("/cancel/{task_id}", summary="取消任务")
 async def cancel_task(task_id: int):

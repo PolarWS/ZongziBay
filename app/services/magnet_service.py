@@ -1,28 +1,31 @@
-import time
-import re
 import logging
+import re
+import time
 import uuid
 from typing import List
 
-from app.core.config import Config
+from app.core import db
+from app.core.config import config
 from app.core.qb_client import QBittorrentClient
 from app.schemas.base import BusinessException, ErrorCode
 from app.schemas.magnet import MagnetFile
 from app.schemas.notification import NotificationType
-from app.core import db
 
 logger = logging.getLogger(__name__)
 
+
 class MagnetService:
+    """磁链解析与 qBittorrent 下载服务"""
+
     def __init__(self):
-        self.config = Config()
-        self.qb_config = self.config.get("qbittorrent", {})
-        self.host = self.qb_config.get("host", "http://localhost:8080")
-        self.username = self.qb_config.get("username", "admin")
-        self.password = self.qb_config.get("password", "adminadmin")
+        qb_config = config.get("qbittorrent", {})
+        self.host = qb_config.get("host", "http://localhost:8080")
+        self.username = qb_config.get("username", "admin")
+        self.password = qb_config.get("password", "adminadmin")
         self.client = None
 
     def _get_client(self):
+        """获取或创建 qBittorrent 客户端"""
         if not self.client:
             self.client = QBittorrentClient(self.host, self.username, self.password)
         return self.client
@@ -39,16 +42,15 @@ class MagnetService:
             return False
 
     def parse_magnet(self, magnet_link: str, timeout: int = 60):
+        """解析磁链获取文件列表"""
         client = self._get_client()
-
-        # 提取哈希
+        # 从磁链中提取哈希
         match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', magnet_link)
         if not match:
             raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="无效的磁力链接")
-        
         torrent_hash = match.group(1).lower()
-        
-        # 检查种子是否已存在
+
+        # 若种子已存在，直接读取文件列表
         try:
             existing_torrent = client.get_torrent_info(torrent_hash)
             if existing_torrent:
@@ -57,36 +59,32 @@ class MagnetService:
         except Exception as e:
             logger.warning(f"检查种子存在性时出错: {e}")
 
-        # 添加新种子
+        # 添加新种子以获取元数据（不暂停）
         try:
-            # 正常添加 (不暂停) 以获取元数据
             success = client.add_torrent(urls=magnet_link, is_paused=False)
             if not success:
-                 raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="添加种子失败")
+                raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="添加种子失败")
         except Exception as e:
             logger.error(f"添加种子失败: {e}")
             raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"添加种子失败: {e}")
 
-        # 等待元数据获取
+        # 轮询等待元数据，total_size > 0 表示已获取
         start_time = time.time()
         fetched = False
         result = []
-        
         try:
             while time.time() - start_time < timeout:
                 try:
                     info = client.get_torrent_info(torrent_hash)
-                    # total_size > 0 通常表示元数据已获取
                     if info and info.get('total_size', 0) > 0:
                         result = self.get_files_from_torrent(client, torrent_hash)
                         fetched = True
                         break
                 except Exception as e:
                     logger.warning(f"检查种子信息出错: {e}")
-                
                 time.sleep(2)
         finally:
-            # 清理：删除种子（因为我们只是为了解析）
+            # 仅用于解析，获取后删除种子
             try:
                 client.delete_torrents(hashes=torrent_hash, delete_files=True)
             except Exception as e:
@@ -94,39 +92,17 @@ class MagnetService:
 
         if fetched:
             return result
-        else:
-            raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="等待元数据超时")
-
-    def get_files_from_torrent(self, client, torrent_hash: str) -> List[MagnetFile]:
-        """
-        从种子中获取文件列表
-        """
-        try:
-            files_data = client.get_torrent_files(torrent_hash)
-            result = []
-            for f in files_data:
-                full_path = f.get('name', '')
-                # 简单处理文件名
-                file_name = full_path.replace('\\', '/').split('/')[-1]
-                
-                result.append(MagnetFile(
-                    name=file_name,
-                    path=full_path,
-                    size=f.get('size', 0)
-                ))
-            return result
-        except Exception as e:
-            logger.error(f"获取种子文件列表失败: {e}")
-            raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"获取文件列表失败: {e}")
+        raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="等待元数据超时")
 
     def add_magnet_download(self, magnet_link: str, save_path: str = None) -> dict:
+        """添加磁链下载任务到 qBittorrent"""
         client = self._get_client()
         match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', magnet_link)
         if not match:
             raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="无效的磁力链接")
         torrent_hash = match.group(1).lower()
-    
-        # 1. 检查已有种子
+
+        # 检查是否已有相同种子，避免重复添加
         try:
             existing_torrent = client.get_torrent_info(torrent_hash)
             if existing_torrent:
@@ -142,9 +118,9 @@ class MagnetService:
         except Exception as e:
             raise BusinessException(code=ErrorCode.OPERATION_ERROR,
                                     message=f"检查已有种子失败: {e}")
-    
-        # 2. 生成下载路径
-        temp_dir = self.config.get("magnet.temp_dir")
+
+        # 生成下载路径：优先使用传入路径，否则在 temp_dir 下创建随机子目录
+        temp_dir = config.get("magnet.temp_dir")
         if save_path:
             target_path = save_path
         elif temp_dir:
@@ -152,8 +128,8 @@ class MagnetService:
             target_path = temp_dir.rstrip('/\\') + sep + uuid.uuid4().hex[:8]
         else:
             target_path = None
-    
-        # 3. 先写入数据库，写入失败就抛异常
+
+        # 先写入数据库，失败则中断
         try:
             db.insert_download_task(
                 taskName=torrent_hash,
@@ -166,8 +142,8 @@ class MagnetService:
         except Exception as e:
             raise BusinessException(code=ErrorCode.OPERATION_ERROR,
                                     message=f"写入数据库失败，中断下载: {e}")
-    
-        # 4. 添加下载任务
+
+        # 添加下载任务到 qBittorrent
         try:
             success = client.add_torrent(urls=magnet_link, is_paused=False, save_path=target_path)
             if not success:
@@ -176,7 +152,26 @@ class MagnetService:
         except Exception as e:
             raise BusinessException(code=ErrorCode.OPERATION_ERROR,
                                     message=f"添加下载任务失败: {e}")
-    
         return {"hash": torrent_hash, "status": "下载中", "save_path": target_path}
+
+    def get_files_from_torrent(self, client, torrent_hash: str) -> List[MagnetFile]:
+        """从种子中获取文件列表"""
+        try:
+            files_data = client.get_torrent_files(torrent_hash)
+            result = []
+            for f in files_data:
+                full_path = f.get('name', '')
+                # 取最后一段作为文件名（兼容多层目录）
+                file_name = full_path.replace('\\', '/').split('/')[-1]
+                result.append(MagnetFile(
+                    name=file_name,
+                    path=full_path,
+                    size=f.get('size', 0)
+                ))
+            return result
+        except Exception as e:
+            logger.error(f"获取种子文件列表失败: {e}")
+            raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"获取文件列表失败: {e}")
+
 
 magnet_service = MagnetService()

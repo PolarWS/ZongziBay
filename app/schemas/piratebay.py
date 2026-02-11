@@ -1,7 +1,10 @@
-from pydantic import BaseModel
 from typing import Optional
 
+from pydantic import BaseModel
+
+
 class PirateBayTorrent(BaseModel):
+    """海盗湾种子信息"""
     id: str
     name: str
     info_hash: str

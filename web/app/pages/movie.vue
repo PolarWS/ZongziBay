@@ -1,63 +1,3 @@
-<script setup lang="ts">
-import { searchMovieApiV1TmdbSearchMovieGet } from '@/api/tmdb'
-import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
-import AppEmpty from '@/components/AppEmpty.vue'
-import AppPagination from '@/components/AppPagination.vue'
-
-const route = useRoute()
-const router = useRouter()
-const q = computed(() => (route.query.q as string) || '')
-const page = ref(Number(route.query.page) || 1)
-const loading = ref(false)
-const items = ref<API.TMDBMovie[]>([])
-const total = ref(0)
-const itemsPerPage = 20
-const totalForPagination = computed(() => total.value)
-
-const fetchData = async () => {
-  const query = q.value.trim()
-  if (!query) {
-    items.value = []
-    return
-  }
-  loading.value = true
-  try {
-    const res = await searchMovieApiV1TmdbSearchMovieGet({ query, page: page.value })
-    items.value = res?.data?.items ?? []
-    total.value = res?.data?.total ?? 0
-  } finally {
-    loading.value = false
-  }
-}
-
-watch(() => q.value, () => {
-  page.value = 1
-  router.replace({ path: route.path, query: { q: q.value, page: page.value } })
-  fetchData()
-})
-
-watch(() => page.value, () => {
-  router.replace({ path: route.path, query: { q: q.value, page: page.value } })
-  fetchData()
-})
-
-onMounted(() => {
-  fetchData()
-})
-
-const imgBase = 'https://image.tmdb.org/t/p/w300'
-
-const goPirateBay = (it: API.TMDBMovie) => {
-  const q =
-    (it.original_title && it.original_title.trim()) ||
-    (it.title && it.title.trim()) ||
-    ''
-  if (!q) return
-  const tmdbName = (it.title && it.title.trim()) || (it.original_title && it.original_title.trim()) || ''
-  router.push({ path: '/piratebay', query: { q, tmdbName } })
-}
-</script>
-
 <template>
   <div class="px-2 md:px-0">
     <div class="flex items-center justify-between mb-4">
@@ -103,3 +43,72 @@ const goPirateBay = (it: API.TMDBMovie) => {
     />
   </div>
 </template>
+
+<script setup lang="ts">
+import { searchMovieApiV1TmdbSearchMovieGet } from '@/api/tmdb'
+import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
+import AppEmpty from '@/components/AppEmpty.vue'
+import AppPagination from '@/components/AppPagination.vue'
+
+const route = useRoute()
+const router = useRouter()
+
+// ref / reactive 声明
+const page = ref(Number(route.query.page) || 1)
+const loading = ref(false)
+const items = ref<API.TMDBMovie[]>([])
+const total = ref(0)
+const itemsPerPage = 20
+
+// TMDB 海报基础 URL
+const imgBase = 'https://image.tmdb.org/t/p/w300'
+
+// computed
+const q = computed(() => (route.query.q as string) || '')
+const totalForPagination = computed(() => total.value)
+
+// watch
+watch(() => q.value, () => {
+  page.value = 1
+  router.replace({ path: route.path, query: { q: q.value, page: page.value } })
+  fetchData()
+})
+
+watch(() => page.value, () => {
+  router.replace({ path: route.path, query: { q: q.value, page: page.value } })
+  fetchData()
+})
+
+// 生命周期
+onMounted(() => {
+  fetchData()
+})
+
+// 根据关键词加载电影列表
+const fetchData = async () => {
+  const query = q.value.trim()
+  if (!query) {
+    items.value = []
+    return
+  }
+  loading.value = true
+  try {
+    const res = await searchMovieApiV1TmdbSearchMovieGet({ query, page: page.value })
+    items.value = res?.data?.items ?? []
+    total.value = res?.data?.total ?? 0
+  } finally {
+    loading.value = false
+  }
+}
+
+// 跳转到海盗湾搜索页
+const goPirateBay = (it: API.TMDBMovie) => {
+  const q =
+    (it.original_title && it.original_title.trim()) ||
+    (it.title && it.title.trim()) ||
+    ''
+  if (!q) return
+  const tmdbName = (it.title && it.title.trim()) || (it.original_title && it.original_title.trim()) || ''
+  router.push({ path: '/piratebay', query: { q, tmdbName } })
+}
+</script>
