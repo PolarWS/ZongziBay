@@ -11,7 +11,7 @@ const { logout } = useAuth()
 
 <template>
   <div class="flex flex-col min-h-screen bg-background text-foreground bg-grid">
-    <header class="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+    <header class="fixed top-0 left-0 right-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
       <div class="max-w-7xl mx-auto flex h-16 items-center px-4 sm:px-6 lg:px-8">
         <div class="mr-4 flex gap-2" v-if="!isHome">
           <Button variant="ghost" size="icon" @click="router.back()">
@@ -39,7 +39,7 @@ const { logout } = useAuth()
         </div>
       </div>
     </header>
-    <main class="flex-1">
+    <main class="flex-1 pt-16">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <slot />
       </div>

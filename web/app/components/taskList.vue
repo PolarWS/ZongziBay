@@ -382,7 +382,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                       <thead class="bg-muted/50 sticky top-0">
                         <tr class="text-left">
                           <th class="p-2 font-medium text-muted-foreground">源文件</th>
-                          <th class="p-2 font-medium text-muted-foreground">重命名</th>
+                          <th class="p-2 font-medium text-muted-foreground hidden sm:table-cell">重命名</th>
                           <th class="p-2 font-medium text-muted-foreground text-center">状态</th>
                         </tr>
                       </thead>
@@ -391,7 +391,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                             class="hover:bg-muted/50 cursor-pointer transition-colors"
                             @click="onOpenFileTaskDetails(ft)">
                           <td class="p-2 truncate max-w-[150px]" :title="ft.sourcePath">{{ ft.sourcePath }}</td>
-                          <td class="p-2 truncate max-w-[150px]" :title="ft.file_rename">{{ ft.file_rename }}</td>
+                          <td class="p-2 truncate max-w-[150px] hidden sm:table-cell" :title="ft.file_rename">{{ ft.file_rename }}</td>
                           <td class="p-2 text-center">
                              <div class="flex justify-center" :title="formatFileTaskStatus(ft.file_status)">
                                 <span class="relative flex h-2.5 w-2.5">
