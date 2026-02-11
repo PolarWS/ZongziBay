@@ -41,9 +41,10 @@ async def search_tv(
 async def get_suggestions(
     query: str = Query(..., description="搜索关键词"),
     limit: int = Query(10, description="返回数量限制"),
+    type: str = Query("", description="媒体类型: movie / tv，为空则混合搜索"),
 ):
     """根据输入返回搜索建议（标题补全）"""
-    suggestions = tmdb_service.get_search_suggestions(query, limit)
+    suggestions = tmdb_service.get_search_suggestions(query, limit, media_type=type)
     return BaseResponse.success(data={"suggestions": suggestions})
 
 
@@ -63,6 +64,8 @@ async def get_tv_detail(tv_id: int):
 
 def _convert_result(result: Any) -> dict:
     """将 TMDB 对象转换为字典，过滤私有属性"""
+    if isinstance(result, dict):
+        return result
     if hasattr(result, "__dict__"):
         return {k: v for k, v in result.__dict__.items() if not k.startswith("_")}
     return result

@@ -19,33 +19,66 @@ class TMDBService:
         self.tv = TV()
         self.search = Search()
 
+    @staticmethod
+    def _extract_results(raw) -> List[Any]:
+        """从 tmdbv3api 返回值中安全提取结果列表。
+        
+        tmdbv3api 的 AsObj 正常迭代时直接产出每个结果项（AsObj 实例），
+        但在某些边界情况下会退化为迭代字典 key（字符串）。
+        这里先尝试正常迭代，发现是字符串就回退到取 .results 属性。
+        """
+        if isinstance(raw, list):
+            return raw
+        try:
+            items = list(raw)
+            # 如果迭代产出了字符串，说明遍历的是 dict 的 key 而非结果
+            if items and isinstance(items[0], str):
+                if hasattr(raw, 'results'):
+                    inner = raw.results
+                    return list(inner) if not isinstance(inner, list) else inner
+                return []
+            return items
+        except Exception:
+            return []
+
+    @staticmethod
+    def _extract_total(raw, fallback_obj=None) -> int:
+        """从 tmdbv3api 返回值中安全提取总数"""
+        total = getattr(raw, 'total_results', None)
+        if total is None and fallback_obj is not None:
+            total = getattr(fallback_obj, 'total_results', 0)
+        try:
+            return int(total or 0)
+        except Exception:
+            return 0
+
     def search_movies(self, query: str, page: int = 1) -> List[Any]:
         """搜索电影"""
-        return self.movie.search(query, page=page)
+        if not query or not query.strip():
+            return []
+        raw = self.movie.search(query.strip(), page=page)
+        return self._extract_results(raw)
 
     def search_tv_shows(self, query: str, page: int = 1) -> List[Any]:
         """搜索电视剧/番剧"""
-        return self.tv.search(query, page=page)
+        if not query or not query.strip():
+            return []
+        raw = self.tv.search(query.strip(), page=page)
+        return self._extract_results(raw)
 
     def search_movies_with_total(self, query: str, page: int = 1) -> tuple:
         """搜索电影并返回总数"""
-        results = self.movie.search(query, page=page)
-        total = getattr(self.movie, 'total_results', 0)
-        try:
-            total = int(total)
-        except Exception:
-            total = 0
-        return results, total
+        if not query or not query.strip():
+            return [], 0
+        raw = self.movie.search(query.strip(), page=page)
+        return self._extract_results(raw), self._extract_total(raw, self.movie)
 
     def search_tv_shows_with_total(self, query: str, page: int = 1) -> tuple:
         """搜索剧集并返回总数"""
-        results = self.tv.search(query, page=page)
-        total = getattr(self.tv, 'total_results', 0)
-        try:
-            total = int(total)
-        except Exception:
-            total = 0
-        return results, total
+        if not query or not query.strip():
+            return [], 0
+        raw = self.tv.search(query.strip(), page=page)
+        return self._extract_results(raw), self._extract_total(raw, self.tv)
 
     def search_multi(self, query: str, page: int = 1) -> List[Any]:
         """混合搜索（电影、电视、人物等）"""
@@ -59,18 +92,31 @@ class TMDBService:
         """获取电视剧详情"""
         return self.tv.details(tv_id)
 
-    def get_search_suggestions(self, query: str, limit: int = 10) -> List[str]:
-        """获取搜索补全提示"""
-        if not query:
+    def get_search_suggestions(self, query: str, limit: int = 10, media_type: str = "") -> List[str]:
+        """获取搜索补全提示，支持按类型过滤"""
+        if not query or not query.strip():
             return []
         try:
-            results = self.search.multi(query)
             suggestions = []
-            for result in results:
-                if hasattr(result, 'title'):  # 电影有 title
-                    suggestions.append(result.title)
-                elif hasattr(result, 'name'):  # 剧集有 name
-                    suggestions.append(result.name)
+            if media_type == "movie":
+                results = self._extract_results(self.movie.search(query.strip()))
+                for r in results:
+                    title = getattr(r, 'title', None) or (r.get('title') if isinstance(r, dict) else None)
+                    if title:
+                        suggestions.append(title)
+            elif media_type == "tv":
+                results = self._extract_results(self.tv.search(query.strip()))
+                for r in results:
+                    name = getattr(r, 'name', None) or (r.get('name') if isinstance(r, dict) else None)
+                    if name:
+                        suggestions.append(name)
+            else:
+                results = self.search.multi(query.strip())
+                for result in results:
+                    if hasattr(result, 'title'):
+                        suggestions.append(result.title)
+                    elif hasattr(result, 'name'):
+                        suggestions.append(result.name)
             return list(dict.fromkeys(suggestions))[:limit]  # 去重并截取
         except Exception as e:
             logger.error(f"获取建议时出错: {e}")

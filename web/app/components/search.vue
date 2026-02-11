@@ -23,7 +23,7 @@ const fetchSuggestions = async () => {
     return
   }
   try {
-    const res = await getSuggestionsApiV1TmdbSuggestionsGet({ query: q, limit: 8 })
+    const res = await getSuggestionsApiV1TmdbSuggestionsGet({ query: q, limit: 8, type: props.type } as any)
     suggestions.value = res?.data?.suggestions ?? []
   } catch {
     suggestions.value = []
