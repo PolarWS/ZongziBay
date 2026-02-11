@@ -151,8 +151,8 @@ const handleLogin = async () => {
 }
 
 .glow-1 {
-  width: 400px;
-  height: 400px;
+  width: min(400px, 90vw);
+  height: min(400px, 90vw);
   background: radial-gradient(circle, oklch(0.79 0.18 145 / 0.15), transparent 70%);
   top: -10%;
   left: 50%;
@@ -161,8 +161,8 @@ const handleLogin = async () => {
 }
 
 .glow-2 {
-  width: 300px;
-  height: 300px;
+  width: min(300px, 70vw);
+  height: min(300px, 70vw);
   background: radial-gradient(circle, oklch(0.79 0.18 145 / 0.08), transparent 70%);
   bottom: 10%;
   left: -5%;
@@ -170,8 +170,8 @@ const handleLogin = async () => {
 }
 
 .glow-3 {
-  width: 250px;
-  height: 250px;
+  width: min(250px, 60vw);
+  height: min(250px, 60vw);
   background: radial-gradient(circle, oklch(0.79 0.18 145 / 0.06), transparent 70%);
   top: 40%;
   right: -5%;
@@ -198,7 +198,7 @@ const handleLogin = async () => {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 28px;
+  padding: 20px;
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.04),
     0 6px 24px rgba(0, 0, 0, 0.03);

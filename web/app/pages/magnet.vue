@@ -4,7 +4,7 @@
       <h1 class="text-lg font-semibold whitespace-nowrap">创建任务</h1>
     </div>
     <div class="space-y-2">
-      <div class="rounded-xl border border-border/50 bg-white dark:bg-card shadow-sm p-6 space-y-6">
+      <div class="rounded-xl border border-border/50 bg-white dark:bg-card shadow-sm p-4 sm:p-6 space-y-6">
         <div class="flex flex-col gap-3">
            <div class="font-semibold text-xl break-words flex items-start gap-3 leading-tight text-foreground">
               <div class="p-2 bg-primary/10 rounded-lg shrink-0">
@@ -12,12 +12,12 @@
               </div>
               <span class="mt-1">{{ info.name || '未命名资源' }}</span>
            </div>
-           <div class="text-xs text-muted-foreground break-all pl-4">
+           <div class="text-xs text-muted-foreground break-all pl-2 sm:pl-4">
               {{ magnet || '无磁力链接' }}
            </div>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-6 pt-2 pl-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 pt-2 pl-2 sm:pl-4">
           <!-- Size -->
           <div class="flex flex-col gap-1.5" v-if="info.size">
             <span class="text-muted-foreground font-medium text-xs flex items-center gap-2">
@@ -84,7 +84,7 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-border/50 bg-white dark:bg-card shadow-sm p-6">
+      <div class="rounded-xl border border-border/50 bg-white dark:bg-card shadow-sm p-4 sm:p-6">
         <div class="flex flex-col gap-4">
            <div class="font-semibold text-xl break-words flex items-center gap-3 leading-tight text-foreground">
               <div class="p-2 bg-primary/10 rounded-lg shrink-0">
@@ -93,9 +93,9 @@
               <span class="mt-0.5">任务设置</span>
            </div>
           
-          <div class="flex items-center gap-6 pl-4">
-            <label class="text-sm font-medium text-muted-foreground">类型</label>
-            <RadioGroup v-model="selectedType" class="flex items-center gap-6">
+          <div class="flex items-center gap-4 sm:gap-6 pl-2 sm:pl-4">
+            <label class="text-sm font-medium text-muted-foreground shrink-0">类型</label>
+            <RadioGroup v-model="selectedType" class="flex items-center gap-4 sm:gap-6">
               <div class="flex items-center space-x-2">
                 <RadioGroupItem id="type-movie" value="movie" />
                 <Label for="type-movie" class="cursor-pointer font-normal">电影</Label>
@@ -110,7 +110,7 @@
               </div>
             </RadioGroup>
           </div>
-          <div class="grid gap-4 pt-2 pl-4">
+          <div class="grid gap-4 pt-2 pl-2 sm:pl-4">
              <div class="flex flex-col gap-2">
                <span class="text-xs font-medium text-muted-foreground">下载路径</span>
                <Input v-model="customSourcePath" :placeholder="`默认: ${currentPaths.download}`" class="h-9 text-xs bg-muted/20" />
@@ -123,8 +123,8 @@
         </div>
       </div>
 
-      <div class="rounded-xl border border-border/50 bg-white dark:bg-card shadow-sm p-6 space-y-4">
-        <div class="flex items-center justify-between mb-4">
+      <div class="rounded-xl border border-border/50 bg-white dark:bg-card shadow-sm p-4 sm:p-6 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div class="flex items-center gap-3">
              <div class="p-2 bg-primary/10 rounded-lg shrink-0">
                <FolderOpen class="w-5 h-5 text-primary" />
@@ -132,9 +132,12 @@
              <div class="font-semibold text-xl text-foreground mt-0.5">
                文件列表
              </div>
+             <div class="text-xs text-muted-foreground ml-1">
+               共 {{ files.length }} 个文件
+             </div>
           </div>
-          <div class="flex items-center gap-2">
-            <div class="flex items-center bg-muted rounded-lg p-1 mr-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex items-center bg-muted rounded-lg p-1">
                <Button 
                  size="sm" 
                  variant="ghost" 
@@ -169,9 +172,6 @@
             >
               撤销
             </Button>
-            <div class="text-xs text-muted-foreground ml-2">
-              共 {{ files.length }} 个文件
-            </div>
           </div>
         </div>
 
@@ -209,18 +209,18 @@
             </span>
           </Badge>
 
-          <div class="flex items-center gap-1 ml-1">
+          <div class="flex items-center gap-1 ml-1 shrink-0">
              <Input
                v-model="newKeyword"
                type="text"
-               class="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+               class="h-7 w-20 sm:w-24 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
                placeholder="自定义标签"
                @keydown.enter="addCustomKeyword"
              />
              <Button
                size="sm"
                variant="ghost"
-               class="h-8 w-8 p-0"
+               class="h-7 w-7 p-0"
                @click="addCustomKeyword"
                :disabled="!newKeyword.trim()"
              >
@@ -229,47 +229,47 @@
           </div>
         </div>
 
-        <div class="relative mb-4 min-h-[200px]">
+        <div class="mb-4">
           <AppLoadingOverlay v-if="loading" />
-          <div :class="{ 'opacity-50': loading }">
-            <template v-if="files.length > 0">
-              <div v-if="viewMode === 'list'" class="rounded-md border border-border max-h-[420px] overflow-auto">
-                <ul class="divide-y divide-border">
-                  <li
-                    v-for="(file, index) in files"
-                    :key="file.path"
-                    class="p-3 text-xs flex items-center gap-3 sm:gap-4"
-                  >
-                    <div class="shrink-0 mt-0.5">
-                      <Checkbox
-                        v-model="file.checked"
-                        :id="`file-${index}`"
-                      />
-                    </div>
-                    <div class="flex-1 min-w-0 space-y-1">
-                      <Input
-                        v-model="file.newName"
-                        type="text"
-                        class="block w-full h-8 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs"
-                      />
-                      <div class="text-muted-foreground truncate">
+          <template v-else-if="files.length > 0">
+            <div v-if="viewMode === 'list'" class="rounded-md border border-border max-h-[420px] overflow-auto">
+              <ul class="divide-y divide-border">
+                <li
+                  v-for="(file, index) in files"
+                  :key="file.path"
+                  class="p-3 text-xs flex items-start gap-3"
+                >
+                  <div class="shrink-0 mt-2">
+                    <Checkbox
+                      v-model="file.checked"
+                      :id="`file-${index}`"
+                    />
+                  </div>
+                  <div class="flex-1 min-w-0 space-y-1">
+                    <Input
+                      v-model="file.newName"
+                      type="text"
+                      class="block w-full h-8 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs"
+                    />
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="text-muted-foreground truncate min-w-0">
                         {{ file.path }}
                       </div>
+                      <div class="shrink-0 text-muted-foreground text-right font-mono tabular-nums">
+                        {{ formatFileSize(file.size) }}
+                      </div>
                     </div>
-                    <div class="shrink-0 text-muted-foreground text-right font-mono tabular-nums w-24">
-                      {{ formatFileSize(file.size) }}
-                    </div>
-                  </li>
-                </ul>
-              </div>
-              <FileTreeView v-else :files="files" />
-            </template>
-            <AppEmpty
-              v-else-if="!loading"
-              :title="errMsg ? '解析失败' : '暂无文件'"
-              :description="errMsg || '暂未获取到文件列表'"
-            />
-          </div>
+                  </div>
+                </li>
+              </ul>
+            </div>
+            <FileTreeView v-else :files="files" />
+          </template>
+          <AppEmpty
+            v-else
+            :title="errMsg ? '解析失败' : '暂无文件'"
+            :description="errMsg || '暂未获取到文件列表'"
+          />
         </div>
 
         <div class="flex justify-center gap-4 pt-2" v-if="!loading && files.length > 0">

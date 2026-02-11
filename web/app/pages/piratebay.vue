@@ -1,7 +1,7 @@
 <template>
   <div class="px-2 md:px-0">
-    <div class="flex items-center justify-between mb-4 gap-4">
-      <h1 class="text-lg font-semibold whitespace-nowrap overflow-hidden text-ellipsis">海盗湾搜索：{{ q || '—' }}</h1>
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2 sm:gap-4">
+      <h1 class="text-lg font-semibold truncate min-w-0">海盗湾搜索：{{ q || '—' }}</h1>
       
       <div class="flex items-center gap-2 shrink-0">
         <div class="flex items-center gap-1">
@@ -22,48 +22,44 @@
         <Button size="sm" variant="outline" @click="onClearFilter">清除</Button>
       </div>
     </div>
-    <div class="relative">
-      <AppLoadingOverlay v-if="loading" />
-      <div :class="{ 'opacity-50': loading }">
-        <div v-if="items.length > 0" class="rounded-md border border-border bg-card shadow-sm">
-          <ul class="divide-y divide-border">
-            <li
-              v-for="it in items"
-              :key="it.id"
-              class="p-4 md:p-5 hover:bg-muted/50 cursor-pointer"
-              @click="onOpenDetails(it)"
-            >
-              <div class="text-sm font-medium break-words">
-                {{ it.name }}
-              </div>
-              <div class="mt-2 text-xs text-muted-foreground grid grid-cols-[1fr_auto] items-center gap-y-2 gap-x-6">
-                <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-                  <span v-if="it.added">时间 {{ formatAdded(it.added) }}</span>
-                  <span>大小 {{ formatSize(it.size) }}</span>
-                  <span v-if="it.username">用户 {{ it.username }}</span>
-                  <span>做种 {{ it.seeders }}</span>
-                  <span>下载 {{ it.leechers }}</span>
-                  <span v-if="it.num_files">文件数 {{ it.num_files }}</span>
-                </div>
-                <div class="justify-self-end">
-                  <Button
-                    v-if="it.magnet"
-                    size="sm"
-                    variant="outline"
-                    @click.stop="openMagnetPage(it)"
-                  >
-                    磁力
-                  </Button>
-                </div>
-              </div>
-            </li>
-          </ul>
-        </div>
-        <AppEmpty v-else-if="!loading" :title="errMsg ? '搜索失败' : '暂无结果'">
-          <Button v-if="errMsg" size="sm" @click="fetchData">刷新</Button>
-        </AppEmpty>
-      </div>
+    <AppLoadingOverlay v-if="loading" />
+    <div v-else-if="items.length > 0" class="rounded-md border border-border bg-card shadow-sm">
+      <ul class="divide-y divide-border">
+        <li
+          v-for="it in items"
+          :key="it.id"
+          class="p-4 md:p-5 hover:bg-muted/50 cursor-pointer"
+          @click="onOpenDetails(it)"
+        >
+          <div class="text-sm font-medium break-words">
+            {{ it.name }}
+          </div>
+          <div class="mt-2 text-xs text-muted-foreground grid grid-cols-[1fr_auto] items-center gap-y-2 gap-x-6">
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <span v-if="it.added">时间 {{ formatAdded(it.added) }}</span>
+              <span>大小 {{ formatSize(it.size) }}</span>
+              <span v-if="it.username">用户 {{ it.username }}</span>
+              <span>做种 {{ it.seeders }}</span>
+              <span>下载 {{ it.leechers }}</span>
+              <span v-if="it.num_files">文件数 {{ it.num_files }}</span>
+            </div>
+            <div class="justify-self-end">
+              <Button
+                v-if="it.magnet"
+                size="sm"
+                variant="outline"
+                @click.stop="openMagnetPage(it)"
+              >
+                磁力
+              </Button>
+            </div>
+          </div>
+        </li>
+      </ul>
     </div>
+    <AppEmpty v-else :title="errMsg ? '搜索失败' : '暂无结果'">
+      <Button v-if="errMsg" size="sm" @click="fetchData">刷新</Button>
+    </AppEmpty>
     <Dialog v-model:open="open">
       <DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto w-[90vw] sm:w-full rounded-xl">
         <DialogHeader>
