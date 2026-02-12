@@ -42,3 +42,8 @@ class TMDBTVListResponse(BaseModel):
     """剧集列表分页响应"""
     total: int
     items: List[TMDBTV]
+
+
+class TMDBEnglishTitleResponse(BaseModel):
+    """英文标题响应（供海盗湾等英文搜索使用）"""
+    english_title: Optional[str] = None

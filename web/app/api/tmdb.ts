@@ -16,6 +16,23 @@ export async function getMovieDetailApiV1TmdbMovieMovieIdGet(
   });
 }
 
+/** 获取电影英文标题 获取电影的英文标题，供海盗湾等英文搜索使用。无则返回 null。 GET /api/v1/tmdb/movie/${param0}/english-title */
+export async function getMovieEnglishTitleApiV1TmdbMovieMovieIdEnglishTitleGet(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: API.getMovieEnglishTitleApiV1TmdbMovieMovieIdEnglishTitleGetParams,
+  options?: { [key: string]: any }
+) {
+  const { movie_id: param0, ...queryParams } = params;
+  return request<API.BaseResponseTMDBEnglishTitleResponse_>(
+    `/api/v1/tmdb/movie/${param0}/english-title`,
+    {
+      method: "GET",
+      params: { ...queryParams },
+      ...(options || {}),
+    }
+  );
+}
+
 /** 搜索电影 根据关键词搜索电影 GET /api/v1/tmdb/search/movie */
 export async function searchMovieApiV1TmdbSearchMovieGet(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
@@ -88,4 +105,21 @@ export async function getTvDetailApiV1TmdbTvTvIdGet(
     params: { ...queryParams },
     ...(options || {}),
   });
+}
+
+/** 获取剧集英文标题 获取剧集的英文标题，供海盗湾等英文搜索使用。无则返回 null。 GET /api/v1/tmdb/tv/${param0}/english-title */
+export async function getTvEnglishTitleApiV1TmdbTvTvIdEnglishTitleGet(
+  // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
+  params: API.getTvEnglishTitleApiV1TmdbTvTvIdEnglishTitleGetParams,
+  options?: { [key: string]: any }
+) {
+  const { tv_id: param0, ...queryParams } = params;
+  return request<API.BaseResponseTMDBEnglishTitleResponse_>(
+    `/api/v1/tmdb/tv/${param0}/english-title`,
+    {
+      method: "GET",
+      params: { ...queryParams },
+      ...(options || {}),
+    }
+  );
 }

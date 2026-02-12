@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRight, Search, Clapperboard, Tv } from 'lucide-vue-next'
+import { ArrowRight, Search as SearchIcon, Clapperboard, Tv } from 'lucide-vue-next'
 import { watchDebounced } from '@vueuse/core'
 import { getSuggestionsApiV1TmdbSuggestionsGet } from '@/api/tmdb'
 
@@ -38,6 +38,18 @@ watchDebounced(
   { debounce: 300, maxWait: 800 }
 )
 
+// 切换电影/剧集时刷新补全（或清空）
+watch(
+  () => props.type,
+  () => {
+    if (searchQuery.value.trim()) {
+      fetchSuggestions()
+    } else {
+      suggestions.value = []
+    }
+  }
+)
+
 const submit = () => {
   const q = searchQuery.value.trim()
   if (!q) return
@@ -59,7 +71,7 @@ const submit = () => {
       <div
         class="pointer-events-none absolute inset-y-0 start-0 flex items-center justify-center ps-3 text-muted-foreground/80 peer-disabled:opacity-50"
       >
-        <Search :size="20" :stroke-width="2" />
+        <SearchIcon :size="20" :stroke-width="2" />
       </div>
       <button
         class="absolute inset-y-1 end-1 flex h-12 w-12 items-center justify-center rounded-lg text-muted-foreground/80 transition-colors hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 cursor-pointer"

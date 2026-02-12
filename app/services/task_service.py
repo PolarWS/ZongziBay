@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import time
+import urllib.parse
 from typing import List
 
 from app.core.config import config
@@ -10,6 +11,7 @@ from app.core.qb_client import QBittorrentClient
 from app.schemas.base import BusinessException, ErrorCode
 from app.schemas.notification import NotificationType
 from app.schemas.task import AddTaskRequest
+from app.services.magnet_service import normalize_info_hash
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +25,27 @@ class TaskService:
         self.username = qb_config.get("username", "admin")
         self.password = qb_config.get("password", "adminadmin")
         self.qb_client = QBittorrentClient(self.host, self.username, self.password)
+        self.trackers: List[str] = config.get("trackers", [])
+
+    @staticmethod
+    def _append_trackers(magnet_link: str, trackers: List[str]) -> str:
+        """在磁力链接后追加 tracker 列表"""
+        if not magnet_link or not trackers:
+            return magnet_link or ""
+        result = magnet_link.rstrip("&")
+        for tr in trackers:
+            if tr:
+                result += f"&tr={urllib.parse.quote(tr, safe='')}"
+        return result
 
     def add_task(self, request: AddTaskRequest) -> int:
         # 1. 确定路径：优先使用请求中的路径，否则按 type 选择配置
         if request.type == 'tv':
             default_source = config.get("paths.tv_download_path", "/dl/tv")
             default_target = config.get("paths.tv_target_path", "/nas/tv")
+        elif request.type == 'anime':
+            default_source = config.get("paths.anime_download_path", "/dl/anime")
+            default_target = config.get("paths.anime_target_path", "/nas/anime")
         elif request.type == 'movie':
             default_source = config.get("paths.movie_download_path", "/dl/movies")
             default_target = config.get("paths.movie_target_path", "/nas/movies")
@@ -82,16 +99,19 @@ class TaskService:
             if request.sourceUrl.startswith("magnet:?"):
                 match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', request.sourceUrl)
                 if match:
-                    torrent_hash = match.group(1).lower()
+                    torrent_hash = normalize_info_hash(match.group(1))
 
             if request.file_tasks and not torrent_hash:
                 raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="无法从链接解析Hash，不支持文件选择")
+
+            # 下载时追加 trackers 到磁力链接
+            download_url = self._append_trackers(request.sourceUrl, self.trackers)
 
             # 有文件选择时先暂停添加，等元数据后设置优先级再恢复
             should_filter_files = bool(request.file_tasks)
             is_paused = should_filter_files
             success = self.qb_client.add_torrent(
-                urls=request.sourceUrl,
+                urls=download_url,
                 save_path=source_path,
                 is_paused=is_paused
             )
@@ -133,7 +153,7 @@ class TaskService:
         if source_url and source_url.startswith("magnet:?"):
             match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', source_url)
             if match:
-                torrent_hash = match.group(1).lower()
+                torrent_hash = normalize_info_hash(match.group(1))
 
         if torrent_hash:
             try:

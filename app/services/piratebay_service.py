@@ -18,7 +18,6 @@ class PirateBayService:
     def __init__(self):
         self.base_url = config.get("piratebay.url", "https://apibay.org/q.php")
         self.params_template = config.get("piratebay.params", "q=[q]&cat=200")
-        self.trackers = config.get("trackers", [])
 
     def search(self, query: str) -> List[PirateBayTorrent]:
         """在海盗湾搜索种子"""
@@ -72,11 +71,8 @@ class PirateBayService:
             raise e
 
     def _generate_magnet_link(self, info_hash: str, name: str) -> str:
-        """生成磁力链接"""
-        magnet_link = f"magnet:?xt=urn:btih:{info_hash}&dn={urllib.parse.quote(name)}"
-        for tracker in self.trackers:
-            magnet_link += f"&tr={urllib.parse.quote(tracker)}"
-        return magnet_link
+        """生成磁力链接（不含 trackers，trackers 在下载时由 task_service 追加）"""
+        return f"magnet:?xt=urn:btih:{info_hash}&dn={urllib.parse.quote(name)}"
 
     def _fix_name(self, name: str, username: str) -> str:
         """修正种子名称"""

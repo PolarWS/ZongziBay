@@ -2,7 +2,7 @@
 import { listTasksApiV1TasksListGet, cancelTaskApiV1TasksCancelTaskIdPost } from '@/api/tasks'
 import AppPagination from '@/components/AppPagination.vue'
 import { Loader2, Ban, MoreHorizontal, Download, FolderOpen, Play, CheckCircle2, XCircle, Clock, Activity, FileText, ChevronDown, AlertCircle, ArrowRight } from 'lucide-vue-next'
-import { formatFileTaskStatus } from '@/lib/status'
+import { formatFileTaskStatus } from '@/utils/status'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
 import { onClickOutside } from '@vueuse/core'
@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import AppEmpty from '@/components/AppEmpty.vue'
-import { formatTaskStatus } from '@/lib/status'
+import { formatTaskStatus } from '@/utils/status'
 
 const tasks = ref<API.DownloadTask[]>([])
 const total = ref(0)
@@ -111,13 +111,22 @@ const onCancel = async (task: API.DownloadTask) => {
 }
 
 const confirmCancel = async () => {
-  if (!taskToCancel.value) return
-  
+  const task = taskToCancel.value
+  if (!task) return
+
+  const taskId = task.id
+  if (taskId == null || !Number.isFinite(Number(taskId))) {
+    toast.error('任务 ID 无效，无法取消')
+    cancelDialogOpen.value = false
+    taskToCancel.value = null
+    return
+  }
+
   try {
-    await cancelTaskApiV1TasksCancelTaskIdPost(taskToCancel.value.id)
+    await cancelTaskApiV1TasksCancelTaskIdPost({ task_id: taskId })
     toast.success('任务已取消')
     loadTasks()
-    if (selected.value?.id === taskToCancel.value.id) {
+    if (selected.value?.id === taskId) {
       open.value = false
     }
   } catch (e: any) {
@@ -168,17 +177,17 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
       </div>
     </div>
 
-    <!-- Table Container -->
+    <!-- Table Container：桌面端不出现横向滚动条，表格随容器宽度自适应 -->
     <div class="rounded-xl border border-border overflow-hidden relative z-10">
-      <div class="w-full overflow-auto">
-        <table class="w-full caption-bottom text-sm">
+      <div class="w-full overflow-x-auto md:overflow-x-visible">
+        <table class="w-full caption-bottom text-sm table-fixed min-w-0">
           <thead class="[&_tr]:border-b">
             <tr class="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 w-[30%] min-w-[200px]">任务名称</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 min-w-[150px]">来源</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 min-w-[100px]">目标路径</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 w-[100px] min-w-[100px]">状态</th>
-              <th class="h-12 px-4 text-right align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 w-[80px] min-w-[80px]">操作</th>
+              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[26%]">任务名称</th>
+              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%]">来源</th>
+              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%]">目标路径</th>
+              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[14%]">状态</th>
+              <th class="h-12 px-4 text-right align-middle font-medium text-muted-foreground w-[12%]">操作</th>
             </tr>
           </thead>
           <tbody class="[&_tr:last-child]:border-0">
@@ -205,16 +214,16 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
               class="border-b transition-colors hover:bg-muted/30 data-[state=selected]:bg-muted cursor-pointer group"
               @click="onOpenDetails(item)"
             >
-              <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 font-medium text-foreground">
-                {{ item.taskName }}
+              <td class="p-4 align-middle font-medium text-foreground min-w-0">
+                <div class="truncate" :title="item.taskName">{{ item.taskName }}</div>
               </td>
-              <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 text-muted-foreground font-mono text-xs">
-                <div class="max-w-[200px] truncate" :title="item.sourceUrl || item.sourcePath">
+              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0">
+                <div class="truncate" :title="item.sourceUrl || item.sourcePath">
                   {{ item.sourceUrl || item.sourcePath }}
                 </div>
               </td>
-              <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 text-muted-foreground font-mono text-xs">
-                <div class="max-w-[150px] truncate" :title="item.targetPath">
+              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0">
+                <div class="truncate" :title="item.targetPath">
                   {{ item.targetPath }}
                 </div>
               </td>

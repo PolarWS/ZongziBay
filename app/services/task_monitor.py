@@ -8,7 +8,7 @@ from typing import List
 from app.core import db
 from app.core.config import config
 from app.schemas.notification import NotificationType
-from app.services.magnet_service import magnet_service
+from app.services.magnet_service import magnet_service, normalize_info_hash
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,9 @@ class TaskMonitor:
                 if not torrent_hash:
                     logger.warning(f"无法获取任务 {task['id']} 的 Hash，跳过检查。Name={task['taskName']}")
                     continue
+                # qBittorrent API 只认 40 位 hex，若仍是 32 位 Base32 则再规范化一次（兼容旧数据或未规范化的来源）
+                if len(torrent_hash) == 32:
+                    torrent_hash = normalize_info_hash(torrent_hash)
 
                 torrent_info = client.get_torrent_info(torrent_hash)
                 if not torrent_info:
@@ -123,13 +126,13 @@ class TaskMonitor:
                 logger.error(f"检查任务 {task.get('id')} 失败: {e}")
 
     def _extract_torrent_hash(self, task_name: str, source_url: str) -> str | None:
-        """从任务名或链接中提取种子 Hash"""
-        if re.match(r'^[a-fA-F0-9]{40}$', task_name):
-            return task_name.lower()
-        if source_url and source_url.startswith("magnet:?"):
+        """从任务名或链接中提取种子 Hash，统一为 40 位小写 hex 以便与 qBittorrent API 一致"""
+        if re.match(r'^[a-fA-F0-9]{40}$', (task_name or "").strip()):
+            return task_name.strip().lower()
+        if source_url and (source_url.startswith("magnet:?") or source_url.startswith("magnet:")):
             match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', source_url)
             if match:
-                return match.group(1).lower()
+                return normalize_info_hash(match.group(1))
         return None
 
     def _map_status(self, qb_state: str) -> str:

@@ -6,3 +6,7 @@ python-multipart
 python-jose[cryptography]
 passlib[bcrypt]
 tmdbv3api
+
+# 测试
+pytest
+pytest-asyncio

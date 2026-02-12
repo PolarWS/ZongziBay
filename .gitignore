@@ -5,8 +5,10 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
 docs/
 test_download/
+.pytest_cache/
 
 # Python
 __pycache__/

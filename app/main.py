@@ -46,16 +46,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# 中间件顺序：后添加的先执行。先加 JWT，再加 CORS，这样 CORS 为最外层，能给所有响应加上 CORS 头。
+app.add_middleware(JWTAuthMiddleware)
+
+# 开发环境允许跨域请求的地址列表
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://127.0.0.1:3001"],
+    allow_origins=[
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
-
-# JWT 认证中间件（放在 CORS 之后注册，确保 CORS 在外层优先处理预检请求）
-app.add_middleware(JWTAuthMiddleware)
 
 # 注册全局异常处理器
 register_exception_handlers(app)
