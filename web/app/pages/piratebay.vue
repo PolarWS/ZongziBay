@@ -1,3 +1,192 @@
+<script setup lang="ts">
+import { searchTorrentsApiV1PiratebaySearchGet } from '@/api/pirateBay'
+import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
+import AppEmpty from '@/components/AppEmpty.vue'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  ArrowUpCircle,
+  ArrowDownCircle,
+  HardDrive,
+  Files,
+  User,
+  Clock,
+  Tag,
+  Film,
+  Magnet
+} from 'lucide-vue-next'
+
+const route = useRoute()
+const router = useRouter()
+
+// 响应式状态：加载、列表、详情弹窗与季/集筛选
+const loading = ref(false)
+const items = ref<API.PirateBayTorrent[]>([])
+const open = ref(false)
+const selected = ref<API.PirateBayTorrent | null>(null)
+const errMsg = ref<string | null>(null)
+const season = ref('')
+const episode = ref('')
+
+// 从路由派生的计算属性
+const q = computed(() => (route.query.q as string) || '')
+const tmdbName = computed(() => (route.query.tmdbName as string) || '')
+const tmdbYear = computed(() => (route.query.tmdbYear as string) || '')
+
+// 从关键词中解析 SxxExx / Sxx / Exx 并回填到季/集输入框
+const initFromQ = () => {
+  const currentQ = q.value
+  let match = currentQ.match(/(.+?)\s+S(\d+)E(\d+)/i)
+  if (match) {
+    season.value = match[2]
+    episode.value = match[3]
+    return
+  }
+  match = currentQ.match(/(.+?)\s+S(\d+)/i)
+  if (match) {
+    season.value = match[2]
+    episode.value = ''
+    return
+  }
+  match = currentQ.match(/(.+?)\s+E(\d+)/i)
+  if (match) {
+    season.value = ''
+    episode.value = match[2]
+    return
+  }
+  season.value = ''
+  episode.value = ''
+}
+
+// 关键词变化时先解析季/集，再拉取列表
+watch(() => q.value, initFromQ, { immediate: true })
+
+watch(() => q.value, () => {
+  fetchData()
+})
+
+// 挂载时拉取海盗湾搜索结果
+onMounted(() => {
+  fetchData()
+})
+
+// 格式化文件大小显示
+const formatSize = (s: string) => {
+  const n = Number(s)
+  if (!isFinite(n) || n <= 0) return '—'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0
+  let v = n
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(2)} ${units[i]}`
+}
+
+// 格式化时间戳为本地日期时间
+const formatAdded = (s: string) => {
+  const n = Number(s)
+  if (!isFinite(n) || n <= 0) return '—'
+  const ms = n > 1e12 ? n : n * 1000
+  const d = new Date(ms)
+  const pad = (x: number) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// 应用季/集筛选：拼成新关键词并写回路由
+const onApplyFilter = () => {
+  let base = q.value
+  base = base.replace(/\s+S\d+E\d+/i, '')
+             .replace(/\s+S\d+/i, '')
+             .replace(/\s+E\d+/i, '')
+             .trim()
+  let suffix = ''
+  if (season.value) {
+    const s = season.value.toString().padStart(2, '0')
+    suffix += ` S${s}`
+    if (episode.value) {
+      const e = episode.value.toString().padStart(2, '0')
+      suffix += `E${e}`
+    }
+  }
+  if (suffix) {
+    const newQ = `${base}${suffix}`
+    router.replace({ query: { ...route.query, q: newQ } })
+  } else {
+    router.replace({ query: { ...route.query, q: base } })
+  }
+}
+
+// 清除季/集后重新应用筛选
+const onClearFilter = () => {
+  season.value = ''
+  episode.value = ''
+  onApplyFilter()
+}
+
+// 请求海盗湾搜索接口
+const fetchData = async () => {
+  const query = q.value.trim()
+  if (!query) {
+    items.value = []
+    return
+  }
+  loading.value = true
+  try {
+    const res = await searchTorrentsApiV1PiratebaySearchGet({ q: query })
+    const code = (res as any)?.code ?? 0
+    const msg = (res as any)?.message ?? ''
+    const data = (res as any)?.data ?? []
+    const ok = code === 0 || code === 200
+    if (!ok) {
+      errMsg.value = msg || '搜索失败'
+      items.value = []
+    } else {
+      errMsg.value = null
+      items.value = Array.isArray(data) ? data : []
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+// 打开详情弹窗
+const onOpenDetails = (it: API.PirateBayTorrent) => {
+  selected.value = it
+  open.value = true
+}
+
+// 跳转磁链任务创建页并携带 TMDB 信息
+const openMagnetPage = (it: API.PirateBayTorrent) => {
+  if (!it.magnet) return
+  router.push({
+    path: '/magnet',
+    query: {
+      magnet: it.magnet,
+      name: it.name,
+      size: it.size,
+      seeders: it.seeders,
+      leechers: it.leechers,
+      num_files: it.num_files,
+      username: it.username,
+      added: it.added,
+      category: it.category,
+      imdb: it.imdb || '',
+      tmdbName: tmdbName.value,
+      tmdbYear: tmdbYear.value,
+    },
+  })
+}
+</script>
+
 <template>
   <div class="px-2 md:px-0">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2 sm:gap-4">
@@ -149,199 +338,3 @@
     </Dialog>
   </div>
 </template>
-
-<script setup lang="ts">
-import { searchTorrentsApiV1PiratebaySearchGet } from '@/api/pirateBay'
-import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
-import AppEmpty from '@/components/AppEmpty.vue'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { 
-  ArrowUpCircle, 
-  ArrowDownCircle, 
-  HardDrive, 
-  Files, 
-  User, 
-  Clock, 
-  Tag, 
-  Film, 
-  Magnet 
-} from 'lucide-vue-next'
-
-const route = useRoute()
-const router = useRouter()
-
-// ref / reactive 声明
-const loading = ref(false)
-const items = ref<API.PirateBayTorrent[]>([])
-const open = ref(false)
-const selected = ref<API.PirateBayTorrent | null>(null)
-const errMsg = ref<string | null>(null)
-const season = ref('')
-const episode = ref('')
-
-// computed
-const q = computed(() => (route.query.q as string) || '')
-const tmdbName = computed(() => (route.query.tmdbName as string) || '')
-
-// 从关键词中解析 SxxExx / Sxx / Exx
-const initFromQ = () => {
-  const currentQ = q.value
-  
-  // 尝试匹配 SxxExx
-  let match = currentQ.match(/(.+?)\s+S(\d+)E(\d+)/i)
-  if (match) {
-    season.value = match[2]
-    episode.value = match[3]
-    return
-  }
-
-  // 尝试匹配 Sxx
-  match = currentQ.match(/(.+?)\s+S(\d+)/i)
-  if (match) {
-    season.value = match[2]
-    episode.value = ''
-    return
-  }
-
-  // 尝试匹配 Exx（较少见）
-  match = currentQ.match(/(.+?)\s+E(\d+)/i)
-  if (match) {
-    season.value = ''
-    episode.value = match[2]
-    return
-  }
-  
-  season.value = ''
-  episode.value = ''
-}
-
-// watch
-watch(() => q.value, initFromQ, { immediate: true })
-
-watch(() => q.value, () => {
-  fetchData()
-})
-
-// 生命周期
-onMounted(() => {
-  fetchData()
-})
-
-// 格式化文件大小
-const formatSize = (s: string) => {
-  const n = Number(s)
-  if (!isFinite(n) || n <= 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  let v = n
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(2)} ${units[i]}`
-}
-
-// 格式化时间戳
-const formatAdded = (s: string) => {
-  const n = Number(s)
-  if (!isFinite(n) || n <= 0) return '—'
-  const ms = n > 1e12 ? n : n * 1000
-  const d = new Date(ms)
-  const pad = (x: number) => String(x).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-// 应用 S/E 筛选
-const onApplyFilter = () => {
-  let base = q.value
-  base = base.replace(/\s+S\d+E\d+/i, '')
-             .replace(/\s+S\d+/i, '')
-             .replace(/\s+E\d+/i, '')
-             .trim()
-  
-  let suffix = ''
-  if (season.value) {
-    const s = season.value.toString().padStart(2, '0')
-    suffix += ` S${s}`
-    
-    if (episode.value) {
-        const e = episode.value.toString().padStart(2, '0')
-        suffix += `E${e}`
-    }
-  }
-
-  if (suffix) {
-    const newQ = `${base}${suffix}`
-    router.replace({ query: { ...route.query, q: newQ } })
-  } else {
-    router.replace({ query: { ...route.query, q: base } })
-  }
-}
-
-const onClearFilter = () => {
-  season.value = ''
-  episode.value = ''
-  onApplyFilter()
-}
-
-// 加载海盗湾搜索结果
-const fetchData = async () => {
-  const query = q.value.trim()
-  if (!query) {
-    items.value = []
-    return
-  }
-  loading.value = true
-  try {
-    const res = await searchTorrentsApiV1PiratebaySearchGet({ q: query })
-    const code = (res as any)?.code ?? 0
-    const msg = (res as any)?.message ?? ''
-    const data = (res as any)?.data ?? []
-    const ok = code === 0 || code === 200
-    if (!ok) {
-      errMsg.value = msg || '搜索失败'
-      items.value = []
-    } else {
-      errMsg.value = null
-      items.value = Array.isArray(data) ? data : []
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
-// 打开详情弹窗
-const onOpenDetails = (it: API.PirateBayTorrent) => {
-  selected.value = it
-  open.value = true
-}
-
-// 跳转到磁链任务创建页
-const openMagnetPage = (it: API.PirateBayTorrent) => {
-  if (!it.magnet) return
-  router.push({
-    path: '/magnet',
-    query: {
-      magnet: it.magnet,
-      name: it.name,
-      size: it.size,
-      seeders: it.seeders,
-      leechers: it.leechers,
-      num_files: it.num_files,
-      username: it.username,
-      added: it.added,
-      category: it.category,
-      imdb: it.imdb || '',
-      tmdbName: tmdbName.value,
-    },
-  })
-}
-</script>

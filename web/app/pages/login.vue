@@ -16,6 +16,7 @@ const username = ref('')
 const password = ref('')
 const loading = ref(false)
 
+// 提交登录：校验后请求 token，成功则写 token 并跳转首页
 const handleLogin = async () => {
   if (!username.value || !password.value) {
     toast.error('请输入用户名和密码')

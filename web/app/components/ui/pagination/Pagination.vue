@@ -3,7 +3,7 @@ import type { PaginationRootEmits, PaginationRootProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
 import { PaginationRoot, useForwardPropsEmits } from "reka-ui"
-import { cn } from "@/lib/utils"
+import { cn } from "@/utils/cn"
 
 const props = defineProps<PaginationRootProps & {
   class?: HTMLAttributes["class"]

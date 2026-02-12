@@ -8,7 +8,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
-import { cn } from '@/lib/utils'
+import { cn } from '@/utils/cn'
 
 const props = withDefaults(defineProps<{
   page: number

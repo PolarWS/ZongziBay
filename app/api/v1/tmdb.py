@@ -9,6 +9,7 @@ from app.schemas.tmdb import (
     TMDBTV,
     TMDBTVListResponse,
     TMDBSuggestionResponse,
+    TMDBEnglishTitleResponse,
 )
 from app.services.tmdb_service import tmdb_service
 
@@ -60,6 +61,28 @@ async def get_tv_detail(tv_id: int):
     """获取指定电视剧的详细信息"""
     result = tmdb_service.get_tv_details(tv_id)
     return BaseResponse.success(data=_convert_result(result))
+
+
+@router.get(
+    "/movie/{movie_id}/english-title",
+    response_model=BaseResponse[TMDBEnglishTitleResponse],
+    summary="获取电影英文标题",
+)
+async def get_movie_english_title(movie_id: int):
+    """获取电影的英文标题，供海盗湾等英文搜索使用。无则返回 null。"""
+    title = tmdb_service.get_movie_english_title(movie_id)
+    return BaseResponse.success(data=TMDBEnglishTitleResponse(english_title=title))
+
+
+@router.get(
+    "/tv/{tv_id}/english-title",
+    response_model=BaseResponse[TMDBEnglishTitleResponse],
+    summary="获取剧集英文标题",
+)
+async def get_tv_english_title(tv_id: int):
+    """获取剧集的英文标题，供海盗湾等英文搜索使用。无则返回 null。"""
+    title = tmdb_service.get_tv_english_title(tv_id)
+    return BaseResponse.success(data=TMDBEnglishTitleResponse(english_title=title))
 
 
 def _convert_result(result: Any) -> dict:

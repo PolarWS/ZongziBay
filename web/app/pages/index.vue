@@ -1,6 +1,18 @@
+<script setup lang="ts">
+import Search from '@/components/Search.vue'
+import { Button } from '@/components/ui/button'
+import { Activity, ExternalLink } from 'lucide-vue-next'
+
+// 首页搜索类型：电影 / 剧集，用于搜索框与跳转
+const type = ref<'movie' | 'tv'>('tv')
+const onChangeType = (v: 'movie' | 'tv') => {
+  type.value = v
+}
+</script>
+
 <template>
     <div class="flex flex-col items-center justify-center pt-10 pb-24 md:pt-20 md:pb-20 relative z-30">
-        <!-- Hero Section -->
+        <!-- 首屏主视觉 -->
         <div class="text-center max-w-4xl mx-auto space-y-4 md:space-y-6 px-4">
             <h1 class="text-4xl md:text-7xl font-bold tracking-tight text-foreground">
                 <span class="text-primary">粽子湾</span>
@@ -12,8 +24,8 @@
             </p>
             
             <div class="flex flex-col items-center gap-5 md:gap-8 mt-6 md:mt-12 w-full">
-                <!-- Toggle Buttons -->
-                <div class="flex gap-3 md:gap-4">
+                <!-- 类型切换：电影 / 剧集 -->
+                <div class="flex flex-wrap gap-3 md:gap-4">
                     <Button 
                         size="lg" 
                         :variant="type === 'movie' ? 'default' : 'outline'"
@@ -34,7 +46,7 @@
                     </Button>
                 </div>
 
-                <!-- Search Component -->
+                <!-- 搜索框 -->
                 <div class="w-full max-w-xl">
                     <Search :type="type" />
                 </div>
@@ -45,7 +57,7 @@
     <div class="border-t border-border bg-card pt-12 pb-20 relative z-20 shadow-sm overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 md:px-10">
             <div class="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-8 lg:gap-12 items-start">
-                 <!-- Left Sidebar -->
+                 <!-- 左侧边栏 -->
                  <div class="space-y-4 lg:sticky lg:top-24">
                      <div class="flex items-center gap-3">
                          <div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
@@ -57,30 +69,18 @@
                          监控并管理您的活跃下载任务。实时获取状态更新及媒体代理的资源分配情况。
                      </p>
                      <div class="pt-4 border-t border-border/40">
-                        <div class="text-xs font-mono text-muted-foreground mb-2 uppercase tracking-wider">github项目地址</div>
+                        <div class="text-xs font-mono text-muted-foreground mb-2 uppercase tracking-wider">GitHub 项目地址</div>
                         <a href="https://github.com/PolarWS" target="_blank" class="text-sm font-medium hover:underline flex items-center gap-1 text-primary">
                             github.com/ZongziBay <ExternalLink class="w-3 h-3" />
                         </a>
                      </div>
                  </div>
                  
-                 <!-- Right Content -->
-                 <div class="w-full">
+                 <!-- 右侧内容：min-w-0 让 grid 子项可收缩，避免表格撑出横向滚动 -->
+                 <div class="w-full min-w-0">
                      <TaskList />
                  </div>
             </div>
         </div>
     </div>
 </template>
-
-<script setup lang="ts">
-import Search from '@/components/search.vue'
-import { Button } from '@/components/ui/button'
-import { Activity, ExternalLink } from 'lucide-vue-next'
-
-// 当前搜索类型（电影/剧集）
-const type = ref<'movie' | 'tv'>('tv')
-const onChangeType = (v: 'movie' | 'tv') => {
-  type.value = v
-}
-</script>

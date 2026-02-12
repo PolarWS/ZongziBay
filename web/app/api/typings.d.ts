@@ -16,6 +16,98 @@ declare namespace API {
     type?: string | null;
   };
 
+  type AnimeGardenFansub = {
+    /** Id */
+    id: number;
+    /** Name */
+    name: string;
+    /** Avatar */
+    avatar?: string | null;
+  };
+
+  type AnimeGardenPagination = {
+    /** Page */
+    page: number;
+    /** Pagesize */
+    pageSize: number;
+    /** Complete */
+    complete: boolean;
+  };
+
+  type AnimeGardenPublisher = {
+    /** Id */
+    id: number;
+    /** Name */
+    name: string;
+    /** Avatar */
+    avatar?: string | null;
+  };
+
+  type AnimeGardenResource = {
+    /** Id */
+    id: number;
+    /** Provider */
+    provider: string;
+    /** Providerid */
+    providerId: string;
+    /** Title */
+    title: string;
+    /** Href */
+    href: string;
+    /** Type */
+    type: string;
+    /** Magnet */
+    magnet: string;
+    /** Size */
+    size: number;
+    /** Createdat */
+    createdAt: string;
+    /** Fetchedat */
+    fetchedAt: string;
+    publisher?: AnimeGardenPublisher | null;
+    fansub?: AnimeGardenFansub | null;
+    /** Subjectid */
+    subjectId?: number | null;
+  };
+
+  type animeGardenSearchParams = {
+    /** 搜索关键词，支持中文/繁体 */
+    q: string;
+    /** 页码 */
+    page?: number;
+    /** 每页数量 */
+    page_size?: number | null;
+    /** 字幕组筛选（名称） */
+    fansub?: string | null;
+  };
+
+  type AnimeGardenSearchResult = {
+    /** Status */
+    status: string;
+    /** Complete */
+    complete: boolean;
+    /** Resources */
+    resources: AnimeGardenResource[];
+    pagination?: AnimeGardenPagination | null;
+    /** Filter */
+    filter?: Record<string, any> | null;
+    /** Timestamp */
+    timestamp?: string | null;
+  };
+
+  type AnimeGardenTeam = {
+    /** Id */
+    id: number;
+    /** Name */
+    name: string;
+    /** Provider */
+    provider?: string | null;
+    /** Providerid */
+    providerId?: string | null;
+    /** Avatar */
+    avatar?: any | null;
+  };
+
   type BaseResponse = {
     /** Code */
     code?: number;
@@ -23,6 +115,14 @@ declare namespace API {
     message?: string;
     /** Data */
     data?: any | null;
+  };
+
+  type BaseResponseAnimeGardenSearchResult_ = {
+    /** Code */
+    code?: number;
+    /** Message */
+    message?: string;
+    data?: AnimeGardenSearchResult | null;
   };
 
   type BaseResponseBool_ = {
@@ -50,6 +150,15 @@ declare namespace API {
     message?: string;
     /** Data */
     data?: number | null;
+  };
+
+  type BaseResponseListAnimeGardenTeam_ = {
+    /** Code */
+    code?: number;
+    /** Message */
+    message?: string;
+    /** Data */
+    data?: AnimeGardenTeam[] | null;
   };
 
   type BaseResponseListPirateBayTorrent_ = {
@@ -83,6 +192,14 @@ declare namespace API {
     /** Message */
     message?: string;
     data?: TaskListResponse | null;
+  };
+
+  type BaseResponseTMDBEnglishTitleResponse_ = {
+    /** Code */
+    code?: number;
+    /** Message */
+    message?: string;
+    data?: TMDBEnglishTitleResponse | null;
   };
 
   type BaseResponseTMDBMovie_ = {
@@ -227,6 +344,10 @@ declare namespace API {
     movie_id: number;
   };
 
+  type getMovieEnglishTitleApiV1TmdbMovieMovieIdEnglishTitleGetParams = {
+    movie_id: number;
+  };
+
   type getNotificationsApiV1NotificationsGetParams = {
     page?: number;
     page_size?: number;
@@ -238,9 +359,15 @@ declare namespace API {
     query: string;
     /** 返回数量限制 */
     limit?: number;
+    /** 媒体类型: movie / tv，为空则混合搜索 */
+    type?: string;
   };
 
   type getTvDetailApiV1TmdbTvTvIdGetParams = {
+    tv_id: number;
+  };
+
+  type getTvEnglishTitleApiV1TmdbTvTvIdEnglishTitleGetParams = {
     tv_id: number;
   };
 
@@ -293,8 +420,7 @@ declare namespace API {
     title: string;
     /** Content */
     content?: string | null;
-    /** Type */
-    type?: string;
+    type?: NotificationType;
     /** Isread */
     isRead: number;
     /** Createtime */
@@ -309,6 +435,8 @@ declare namespace API {
     /** Total */
     total: number;
   };
+
+  type NotificationType = "info" | "success" | "warning" | "error";
 
   type PirateBayTorrent = {
     /** Id */
@@ -358,11 +486,20 @@ declare namespace API {
     page?: number;
   };
 
+  type serveSpaPathGetParams = {
+    path: string;
+  };
+
   type TaskListResponse = {
     /** Total */
     total: number;
     /** Items */
     items: DownloadTask[];
+  };
+
+  type TMDBEnglishTitleResponse = {
+    /** English Title */
+    english_title?: string | null;
   };
 
   type TMDBMovie = {

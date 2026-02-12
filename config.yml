@@ -5,7 +5,7 @@ security:
   password: password123                # 系统登录密码
   secret_key: "CHANGE_THIS_SECRET_KEY" # JWT 签名密钥，生产环境请务必修改此值以保证安全
   algorithm: "HS256"                   # JWT 加密算法
-  access_token_expire_minutes: 30      # Token 过期时间（分钟）
+  access_token_expire_minutes: 1440      # Token 过期时间（分钟）
 
 # TMDB (The Movie Database) 配置
 # 用于获取电影/电视剧的元数据（海报、简介等）
@@ -26,9 +26,16 @@ piratebay:
   url: "https://apibay.org/q.php"      # PirateBay API 地址
   params: "q=[q]&cat=200"              # 搜索参数，[q] 为搜索关键词占位符，cat=200 代表视频类
 
+# 动漫花园 (Anime Garden) 搜索源配置
+# 用于动漫 BT 资源搜索，支持中文/繁体关键词
+anime_garden:
+  url: "https://animes.garden/api/resources"  # Anime Garden 资源列表 API
+  # teams_url 不配置时自动取 url 的 base + /teams，用于获取字幕组列表
+  page_size: 20                               # 每页数量
+
 # 磁力链接相关配置
 magnet:
-  temp_dir: "/tmp_downloads"           # 磁力链接解析时的临时目录
+  temp_dir: "/temp"           # 磁力链接解析时的临时目录
 
 # 数据库配置
 database:
@@ -41,7 +48,8 @@ paths:
   # --- 下载路径配置 (qBittorrent 下载时的保存位置) ---
   default_download_path: "/temp"  # 默认下载保存路径
   movie_download_path: "/temp"    # 电影下载保存路径
-  tv_download_path: "/temp"           # 电视剧下载保存路径
+  tv_download_path: "/temp"       # 电视剧下载保存路径
+  anime_download_path: "/temp"    # 番剧下载保存路径
 
   # 根路径前缀
   root_path: "/nas"
@@ -50,10 +58,12 @@ paths:
   default_target_path: "/nas/movies"   # 默认归档路径
   movie_target_path: "/nas/movies"     # 电影归档路径
   tv_target_path: "/nas/tv"            # 电视剧归档路径
+  anime_target_path: "/nas/anime"      # 番剧归档路径
 
 # BT Trackers 列表
 # 用于加速种子下载，添加更多 Tracker 可以增加连接到 Peers 的几率
 trackers:
+  # 通用公网
   - "udp://tracker.opentrackr.org:1337/announce"
   - "udp://open.stealth.si:80/announce"
   - "udp://tracker.torrent.eu.org:451/announce"
@@ -74,3 +84,12 @@ trackers:
   - "udp://opentracker.io:6969/announce"
   - "udp://open.tracker.cl:1337/announce"
   - "udp://open.dstud.io:6969/announce"
+  # 动漫/亚洲向常用公网 tracker
+  - "udp://tracker.openbittorrent.com:80/announce"
+  - "udp://tracker.internetwarriors.net:1337/announce"
+  - "udp://tracker.cyberia.is:6969/announce"
+  - "udp://tracker.tiny-vps.com:6969/announce"
+  - "udp://tracker.bt4g.com:1515/announce"
+  - "udp://tracker.theoks.net:6969/announce"
+  - "udp://tracker.novg.net:6969/announce"
+  - "udp://tracker.4.babico.org:6969/announce"

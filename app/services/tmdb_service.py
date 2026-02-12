@@ -1,11 +1,27 @@
 import logging
-from typing import Any, List
+from typing import Any, List, Optional
 
 from tmdbv3api import TMDb, Movie, TV, Search
 
 from app.core.config import config
 
 logger = logging.getLogger(__name__)
+
+# 英文区国家优先级（用于从 alternative_titles 中选取英文标题）
+_ENGLISH_COUNTRIES = ("US", "GB", "AU", "CA")
+
+
+def _attr_or_key(obj: Any, key: str) -> Optional[str]:
+    """从 tmdbv3api AsObj 或 dict 中取属性/键值"""
+    if obj is None:
+        return None
+    v = getattr(obj, key, None)
+    if v is not None:
+        return str(v).strip() if v else None
+    if isinstance(obj, dict):
+        v = obj.get(key)
+        return str(v).strip() if v else None
+    return None
 
 
 class TMDBService:
@@ -91,6 +107,70 @@ class TMDBService:
     def get_tv_details(self, tv_id: int) -> Any:
         """获取电视剧详情"""
         return self.tv.details(tv_id)
+
+    def get_movie_english_title(self, movie_id: int) -> Optional[str]:
+        """获取电影的英文标题（供海盗湾等英文搜索使用）。优先 en-US 详情主标题，再 fallback 到 alternative_titles。"""
+        try:
+            old_lang = self.tmdb.language
+            self.tmdb.language = "en-US"
+            try:
+                detail = self.movie.details(movie_id)
+                title = _attr_or_key(detail, "title")
+                if title:
+                    return title
+            finally:
+                self.tmdb.language = old_lang
+        except Exception as e:
+            logger.debug("获取电影英文主标题失败 movie_id=%s: %s", movie_id, e)
+        try:
+            raw = self.movie.alternative_titles(movie_id)
+            titles = raw if isinstance(raw, list) else list(raw) if raw else []
+            for country in _ENGLISH_COUNTRIES:
+                for t in titles:
+                    if (_attr_or_key(t, "iso_3166_1") or "").upper() == country:
+                        title = _attr_or_key(t, "title")
+                        if title:
+                            return title
+            for t in titles:
+                title = _attr_or_key(t, "title")
+                if title:
+                    return title
+            return None
+        except Exception as e:
+            logger.debug("获取电影英文标题 alternative_titles 失败 movie_id=%s: %s", movie_id, e)
+            return None
+
+    def get_tv_english_title(self, tv_id: int) -> Optional[str]:
+        """获取剧集的英文标题（供海盗湾等英文搜索使用）。优先 en-US 详情主标题（避免取到工作名如 Montauk），再 fallback 到 alternative_titles。"""
+        try:
+            old_lang = self.tmdb.language
+            self.tmdb.language = "en-US"
+            try:
+                detail = self.tv.details(tv_id)
+                name = _attr_or_key(detail, "name")
+                if name:
+                    return name
+            finally:
+                self.tmdb.language = old_lang
+        except Exception as e:
+            logger.debug("获取剧集英文主标题失败 tv_id=%s: %s", tv_id, e)
+        try:
+            raw = self.tv.alternative_titles(tv_id)
+            results = raw if isinstance(raw, list) else list(raw) if raw else []
+            for country in _ENGLISH_COUNTRIES:
+                for t in results:
+                    if (_attr_or_key(t, "iso_3166_1") or "").upper() == country:
+                        title = _attr_or_key(t, "title")
+                        if title:
+                            return title
+            for t in results:
+                title = _attr_or_key(t, "title")
+                if title:
+                    return title
+            return None
+        except Exception as e:
+            logger.debug("获取剧集英文标题 alternative_titles 失败 tv_id=%s: %s", tv_id, e)
+            return None
 
     def get_search_suggestions(self, query: str, limit: int = 10, media_type: str = "") -> List[str]:
         """获取搜索补全提示，支持按类型过滤"""
