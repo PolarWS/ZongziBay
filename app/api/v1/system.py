@@ -10,7 +10,7 @@ router = APIRouter()
 # 仅允许暴露的路径配置键（不含账号密码等敏感项，避免 config 结构变更导致泄露）
 ALLOWED_PATH_KEYS = {
     "default_download_path", "movie_download_path", "tv_download_path", "anime_download_path",
-    "root_path",
+    "download_root_path", "target_root_path", "root_path",
     "default_target_path", "movie_target_path", "tv_target_path", "anime_target_path",
 }
 

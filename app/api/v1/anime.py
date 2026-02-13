@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Query
+from fastapi.concurrency import run_in_threadpool
 
 from app.schemas.anime_garden import AnimeGardenSearchResult, AnimeGardenTeam
 from app.schemas.base import BaseResponse, ErrorCode
@@ -24,7 +25,7 @@ async def anime_garden_search(
 ):
     """调用 Anime Garden /resources，传 search、page、pageSize、fansub。"""
     try:
-        data = service.search(q=q, page=page, page_size=page_size, fansub=fansub)
+        data = await run_in_threadpool(service.search, q=q, page=page, page_size=page_size, fansub=fansub)
         return BaseResponse.success(data=data)
     except Exception:
         return BaseResponse.fail(code=ErrorCode.SYSTEM_ERROR, message="搜索失败")
@@ -39,7 +40,7 @@ async def anime_garden_search(
 async def anime_garden_teams():
     """调用 Anime Garden 字幕组列表接口。"""
     try:
-        teams = service.get_teams()
+        teams = await run_in_threadpool(service.get_teams)
         return BaseResponse.success(data=teams)
     except Exception:
         return BaseResponse.fail(code=ErrorCode.SYSTEM_ERROR, message="获取字幕组列表失败")

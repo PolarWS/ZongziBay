@@ -37,6 +37,11 @@ const MEDIA_EXTS = new Set([...VIDEO_EXTS, ...SUB_EXTS])
 /** 常见分辨率数值，不应被当作集数 */
 const RESOLUTION_NUMBERS = new Set([240, 360, 480, 720, 1080, 1440, 2160])
 
+/** 季号合理范围（避免 S1920 等分辨率被当成季） */
+const SEASON_MAX = 99
+/** 集数合理范围（避免 E1080 等分辨率被当成集） */
+const EPISODE_MAX = 999
+
 /** 中文数字单字 → 数值（仅 零～九） */
 const CN_DIGIT: Record<string, number> = {
   '零': 0, '一': 1, '二': 2, '三': 3, '四': 4,
@@ -148,28 +153,53 @@ function parseSeason(text: string): number | null {
   let m: RegExpMatchArray | null
   let n: number
 
-  // 1. 标准：S01 或 S01E01
+  // 0. 补丁：中文「第X季」简写（第一季～第十季，避免编码或空格导致第X季未命中）
+  //    第十一季及以上由下方「第X季」通用正则 + parseCnNumber 解析（十一、二十等）
+  if (/第二季/.test(text)) return 2
+  if (/第三季/.test(text)) return 3
+  if (/第一季/.test(text)) return 1
+  if (/第四季/.test(text)) return 4
+  if (/第五季/.test(text)) return 5
+  if (/第六季/.test(text)) return 6
+  if (/第七季/.test(text)) return 7
+  if (/第八季/.test(text)) return 8
+  if (/第九季/.test(text)) return 9
+  if (/第十季/.test(text)) return 10
+
+  // 1. 标准：S01 或 S01E01（仅接受 1～SEASON_MAX，避免 S1920 被当季）
   m = text.match(/S(\d+)/i)
-  if (m) { n = safeParseInt(m[1]); if (!isNaN(n)) return n }
+  if (m) {
+    n = safeParseInt(m[1])
+    if (n >= 1 && n <= SEASON_MAX) return n
+  }
 
   // 2. 备选：1x01
   m = text.match(/(\d+)x\d+/i)
-  if (m) { n = safeParseInt(m[1]); if (!isNaN(n)) return n }
+  if (m) {
+    n = safeParseInt(m[1])
+    if (n >= 1 && n <= SEASON_MAX) return n
+  }
 
   // 3. 中文：第X季（中文数字，支持十百千万）
   m = text.match(/第([零一二三四五六七八九十百千万]+)季/)
   if (m && m[1]) {
     const cn = parseCnNumber(m[1])
-    if (cn !== null) return cn
+    if (cn !== null && cn >= 1 && cn <= SEASON_MAX) return cn
   }
 
   // 4. 中文：第X季（阿拉伯数字）
   m = text.match(/第(\d+)季/)
-  if (m) { n = safeParseInt(m[1]); if (!isNaN(n)) return n }
+  if (m) {
+    n = safeParseInt(m[1])
+    if (n >= 1 && n <= SEASON_MAX) return n
+  }
 
   // 5. 文件夹风格：Season 01 / Season01
   m = text.match(/Season\s*(\d+)/i)
-  if (m) { n = safeParseInt(m[1]); if (!isNaN(n)) return n }
+  if (m) {
+    n = safeParseInt(m[1])
+    if (n >= 1 && n <= SEASON_MAX) return n
+  }
 
   return null
 }
@@ -182,13 +212,21 @@ function parseEpisode(text: string): number | null {
   let m: RegExpMatchArray | null
   let n: number
 
-  // 1. 标准：S01E01
-  m = text.match(/S\d+E(\d+)/i)
-  if (m) { n = safeParseInt(m[1]); if (!isNaN(n)) return n }
+  // 1. 标准：S01E01（仅当季在合理范围时采纳，避免 S1920E1080 分辨率被当季集）
+  m = text.match(/S(\d+)E(\d+)/i)
+  if (m) {
+    const s = safeParseInt(m[1])
+    n = safeParseInt(m[2])
+    if (s >= 1 && s <= SEASON_MAX && n >= 1 && n <= EPISODE_MAX) return n
+  }
 
   // 2. 备选：1x01
-  m = text.match(/\d+x(\d+)/i)
-  if (m) { n = safeParseInt(m[1]); if (!isNaN(n)) return n }
+  m = text.match(/(\d+)x(\d+)/i)
+  if (m) {
+    const s = safeParseInt(m[1])
+    n = safeParseInt(m[2])
+    if (s >= 1 && s <= SEASON_MAX && n >= 1 && n <= EPISODE_MAX) return n
+  }
 
   // 3. 中文：第XX话 / 第XX集 / 第XX話（数字或中文数字）
   m = text.match(/第(\d+)[话集話]/)
