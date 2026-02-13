@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import Search from '@/components/Search.vue'
+import Search from '~/components/Search.vue'
 import { Button } from '@/components/ui/button'
 import { Activity, ExternalLink } from 'lucide-vue-next'
 

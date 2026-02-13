@@ -183,11 +183,11 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
         <table class="w-full caption-bottom text-sm table-fixed min-w-0">
           <thead class="[&_tr]:border-b">
             <tr class="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[26%]">任务名称</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%]">来源</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%]">目标路径</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[14%]">状态</th>
-              <th class="h-12 px-4 text-right align-middle font-medium text-muted-foreground w-[12%]">操作</th>
+              <th class="h-12 px-2 sm:px-4 text-left align-middle font-medium text-muted-foreground w-[50%] sm:w-[26%]">任务名称</th>
+              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%] hidden sm:table-cell">来源</th>
+              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%] hidden sm:table-cell">目标路径</th>
+              <th class="h-12 px-2 sm:px-4 text-left align-middle font-medium text-muted-foreground w-[25%] sm:w-[14%]">状态</th>
+              <th class="h-12 px-2 sm:px-4 text-right align-middle font-medium text-muted-foreground w-[25%] sm:w-[12%]">操作</th>
             </tr>
           </thead>
           <tbody class="[&_tr:last-child]:border-0">
@@ -214,26 +214,27 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
               class="border-b transition-colors hover:bg-muted/30 data-[state=selected]:bg-muted cursor-pointer group"
               @click="onOpenDetails(item)"
             >
-              <td class="p-4 align-middle font-medium text-foreground min-w-0">
+              <td class="p-2 sm:p-4 align-middle font-medium text-foreground min-w-0">
                 <div class="truncate" :title="item.taskName">{{ item.taskName }}</div>
               </td>
-              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0">
+              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0 hidden sm:table-cell">
                 <div class="truncate" :title="item.sourceUrl || item.sourcePath">
                   {{ item.sourceUrl || item.sourcePath }}
                 </div>
               </td>
-              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0">
+              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0 hidden sm:table-cell">
                 <div class="truncate" :title="item.targetPath">
                   {{ item.targetPath }}
                 </div>
               </td>
-              <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0">
+              <td class="p-2 sm:p-4 align-middle [&:has([role=checkbox])]:pr-0">
                  <div class="flex items-center gap-2">
                     <span class="relative flex h-2 w-2">
-                      <span v-if="['downloading', 'moving'].includes(item.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
+                      <span v-if="['downloading', 'moving', 'seeding'].includes(item.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': item.taskStatus === 'seeding' }"></span>
                       <span class="relative inline-flex rounded-full h-2 w-2" 
                         :class="{
                           'bg-blue-500': ['downloading', 'moving'].includes(item.taskStatus || ''),
+                          'bg-purple-500': item.taskStatus === 'seeding',
                           'bg-green-500': item.taskStatus === 'completed',
                           'bg-red-500': ['cancelled', 'error'].includes(item.taskStatus || ''),
                           'bg-yellow-500': item.taskStatus === 'pending'
@@ -243,10 +244,10 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                     <span class="text-xs font-medium capitalize">{{ formatTaskStatus(item.taskStatus) }}</span>
                  </div>
               </td>
-              <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 text-right">
+              <td class="p-2 sm:p-4 align-middle [&:has([role=checkbox])]:pr-0 text-right">
                 <div class="flex items-center justify-end h-8">
                   <Button 
-                     v-if="['downloading', 'pending'].includes(item.taskStatus || '')"
+                     v-if="['downloading', 'pending', 'seeding'].includes(item.taskStatus || '')"
                      variant="ghost" 
                      size="sm" 
                      class="h-8 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2"
@@ -276,7 +277,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
     />
 
     <Dialog v-model:open="open">
-      <DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto w-[90vw] sm:w-full rounded-xl">
+      <DialogContent class="max-h-[85vh] overflow-y-auto overflow-x-hidden w-[calc(100vw-1rem)] sm:w-full max-w-[min(42rem,100vw)] rounded-xl">
         <DialogHeader>
           <DialogTitle class="text-lg font-semibold tracking-tight">{{ selected?.taskName || '任务详情' }}</DialogTitle>
           <DialogDescription>
@@ -301,10 +302,11 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                      </span>
                      <span class="font-mono text-sm pl-5 flex items-center gap-2">
                         <span class="relative flex h-2.5 w-2.5">
-                          <span v-if="['downloading', 'moving'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
+                          <span v-if="['downloading', 'moving', 'seeding'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': selected?.taskStatus === 'seeding' }"></span>
                           <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
                             :class="{
                               'bg-blue-500': ['downloading', 'moving'].includes(selected?.taskStatus || ''),
+                              'bg-purple-500': selected?.taskStatus === 'seeding',
                               'bg-green-500': selected?.taskStatus === 'completed',
                               'bg-red-500': ['cancelled', 'error'].includes(selected?.taskStatus || ''),
                               'bg-yellow-500': selected?.taskStatus === 'pending'
@@ -365,10 +367,11 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                </span>
                <span class="font-mono flex items-center gap-2">
                   <span class="relative flex h-2.5 w-2.5">
-                    <span v-if="['downloading', 'moving'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
+                    <span v-if="['downloading', 'moving', 'seeding'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': selected?.taskStatus === 'seeding' }"></span>
                     <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
                       :class="{
                         'bg-blue-500': ['downloading', 'moving'].includes(selected?.taskStatus || ''),
+                        'bg-purple-500': selected?.taskStatus === 'seeding',
                         'bg-green-500': selected?.taskStatus === 'completed',
                         'bg-red-500': ['cancelled', 'error'].includes(selected?.taskStatus || ''),
                         'bg-yellow-500': selected?.taskStatus === 'pending'
@@ -423,8 +426,8 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
            
            <div class="space-y-2">
               <h4 class="font-medium text-foreground">任务信息</h4>
-              <div class="rounded-md bg-zinc-950 p-4 overflow-x-auto">
-                <pre class="text-xs text-zinc-300 font-mono whitespace-pre-wrap">{{ selected?.taskInfo || '无额外信息' }}</pre>
+              <div class="rounded-md bg-zinc-950 p-4 min-w-0 overflow-x-auto max-w-full">
+                <pre class="text-xs text-zinc-300 font-mono whitespace-pre-wrap break-words">{{ selected?.taskInfo || '无额外信息' }}</pre>
               </div>
            </div>
         </div>
@@ -433,7 +436,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
     
     <!-- File Task Details Dialog -->
      <Dialog v-model:open="fileTaskDialogOpen">
-       <DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto w-[90vw] sm:w-full rounded-xl">
+       <DialogContent class="max-h-[85vh] overflow-y-auto overflow-x-hidden w-[calc(100vw-1rem)] sm:w-full max-w-[min(42rem,100vw)] rounded-xl">
          <DialogHeader>
            <DialogTitle class="text-lg font-semibold tracking-tight">文件任务详情</DialogTitle>
            <DialogDescription>
@@ -441,8 +444,8 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
            </DialogDescription>
          </DialogHeader>
          
-         <div class="mt-4 grid gap-4 text-sm">
-           <div class="grid grid-cols-[100px_1fr] items-start gap-y-4 gap-x-4 p-4 rounded-lg bg-muted/30 border border-border/50">
+         <div class="mt-4 grid gap-4 text-sm min-w-0">
+           <div class="grid grid-cols-1 sm:grid-cols-[100px_1fr] items-start gap-y-4 gap-x-4 p-4 rounded-lg bg-muted/30 border border-border/50">
              
              <!-- Source File -->
              <span class="text-muted-foreground font-medium flex items-center gap-2">
@@ -499,7 +502,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
 
     <!-- Cancel Confirmation -->
     <Dialog v-model:open="cancelDialogOpen">
-      <DialogContent class="max-w-sm">
+      <DialogContent class="max-w-sm overflow-x-hidden w-[calc(100vw-1rem)] sm:w-full">
         <DialogHeader>
           <DialogTitle>取消任务</DialogTitle>
           <DialogDescription>

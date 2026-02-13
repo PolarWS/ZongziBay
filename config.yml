@@ -1,5 +1,9 @@
 # 安全相关配置
 # 用于系统登录认证和 JWT Token 生成
+# 如果你怕安全问题docker可以用以下进行环境变量注入
+# ZONGZI_SECURITY_USERNAME=admin
+# ZONGZI_SECURITY_PASSWORD=你的登录密码
+# ZONGZI_SECURITY_SECRET_KEY=你的JWT密钥
 security:
   username: admin                      # 系统登录用户名
   password: password123                # 系统登录密码
@@ -18,7 +22,20 @@ tmdb:
 qbittorrent:
   host: "http://localhost:8080"        # qBittorrent WebUI 地址
   username: "admin"                    # qBittorrent 用户名
-  password: "adminadmin"               # qBittorrent 密码
+  password: "admin"                    # qBittorrent 密码
+  
+  # 文件处理配置
+  file_handling:
+    # true: 单文件用 qB 移动，多文件由本程序复制到目标路径（复制需本机能访问 qB 的下载目录）；false: 一律用 qB 移动（qB只能移动整个文件夹）
+    use_copy: true
+    copy_delete_on_complete: false     # (仅 use_copy=true 时有效) 复制完成后是否立即删除 qB 任务和源文件
+
+  # 做种监控配置 (仅 use_copy=true 时有效)
+  seeding:
+    limit_ratio: 2.0                  # 分享率限制，-1 为不限制。例如 2.0 代表分享率达到 2.0 时停止
+    delete_on_ratio_reached: true     # 达到分享率是否删除任务
+    delete_files: true                # 删除任务时是否同时删除临时源文件 (仅在 delete_on_ratio_reached=true 时有效)
+
 
 # 海盗湾 (PirateBay) 搜索源配置
 # 用于搜索种子资源
@@ -44,15 +61,19 @@ database:
 # 路径映射配置
 # 用于管理文件下载后的整理和归档路径
 paths:
+  # 根目录是用于补全文件夹前缀的（推送到qb的目录是后缀，如果都为空则不补前缀）
+  # 下载根路径
+  download_root_path: ""
+  # 归档根路径
+  target_root_path: ""
+  # 未配置上述两个时回退用此根路径
+  root_path: ""
 
   # --- 下载路径配置 (qBittorrent 下载时的保存位置) ---
   default_download_path: "/temp"  # 默认下载保存路径
   movie_download_path: "/temp"    # 电影下载保存路径
   tv_download_path: "/temp"       # 电视剧下载保存路径
   anime_download_path: "/temp"    # 番剧下载保存路径
-
-  # 根路径前缀
-  root_path: "/nas"
 
   # --- 归档路径配置 (整理刮削后的最终存储位置) ---
   default_target_path: "/nas/movies"   # 默认归档路径

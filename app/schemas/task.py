@@ -8,6 +8,7 @@ class DownloadTaskStatus(str, Enum):
     """下载任务状态"""
     DOWNLOADING = "downloading"
     MOVING = "moving"
+    SEEDING = "seeding"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     ERROR = "error"

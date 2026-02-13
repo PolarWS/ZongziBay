@@ -145,7 +145,7 @@ onUnmounted(() => {
       <span v-if="unreadCount > 0" class="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"></span>
     </Button>
 
-    <div v-if="isOpen" class="absolute right-0 mt-2 w-80 sm:w-96 rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl z-50 backdrop-blur-sm">
+    <div v-if="isOpen" class="fixed left-1/2 top-20 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-[20rem] rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl z-50 backdrop-blur-sm sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:translate-x-0 sm:w-96 sm:max-w-none">
       <div class="flex items-center justify-between p-4 border-b border-border/50">
         <h4 class="font-semibold text-sm">通知</h4>
         <Button variant="ghost" size="sm" class="h-8 text-xs px-2 hover:bg-muted" @click="handleMarkAllRead" v-if="unreadCount > 0">
