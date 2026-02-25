@@ -81,6 +81,13 @@ paths:
   tv_target_path: "/nas/tv"            # 电视剧归档路径
   anime_target_path: "/nas/anime"      # 番剧归档路径
 
+# 智能重命名模板（磁力解析页「智能重命名」使用）
+# 占位符：{name}=资源名 {year}=年份 {season}=季数 {ss}=季数补零2位 {episode}=集数 {ee}=集数补零2位 {extra}=PV/Menu等 {sub_suffix}=字幕后缀 {ext}=扩展名
+smart_rename:
+  movie: "{name} ({year})/{name} ({year}){extra}{sub_suffix}{ext}"
+  tv: "{name}/Season {season}/{name} S{ss}E{ee}{extra}{sub_suffix}{ext}"
+  anime: "{name}/Season {season}/{name} S{ss}E{ee}{extra}{sub_suffix}{ext}"
+
 # BT Trackers 列表
 # 用于加速种子下载，添加更多 Tracker 可以增加连接到 Peers 的几率
 trackers:

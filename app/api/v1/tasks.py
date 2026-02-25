@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Body, Query
 
 from app.core.db import get_download_tasks
@@ -15,7 +17,7 @@ async def add_task(request: AddTaskRequest = Body(...)):
     - 插入数据库
     - 提交到 qBittorrent
     """
-    task_id = task_service.add_task(request)
+    task_id = await asyncio.to_thread(task_service.add_task, request)
     return BaseResponse.success(data=task_id)
 
 
@@ -24,10 +26,8 @@ async def list_tasks(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页数量")
 ):
-    """
-    获取下载任务列表，支持分页
-    """
-    tasks, total = get_download_tasks(page, page_size)
+    """获取下载任务列表，支持分页"""
+    tasks, total = await asyncio.to_thread(get_download_tasks, page, page_size)
     return BaseResponse.success(data=TaskListResponse(total=total, items=tasks))
 
 
@@ -39,5 +39,5 @@ async def cancel_task(task_id: int):
     - 会从 qBittorrent 删除任务和文件
     - 更新数据库状态为 cancelled
     """
-    task_service.cancel_task(task_id)
+    await asyncio.to_thread(task_service.cancel_task, task_id)
     return BaseResponse.success(message="任务已取消")

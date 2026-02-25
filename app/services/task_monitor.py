@@ -204,6 +204,36 @@ class TaskMonitor:
             logger.warning(f"获取种子文件列表失败，按多文件处理: {e}")
             return False
 
+    def _has_nested_folders(self, client, torrent_hash: str) -> bool:
+        """是否存在嵌套文件夹（任意文件路径中含至少 2 个 '/' 则视为有嵌套）"""
+        try:
+            files = client.get_torrent_files(torrent_hash)
+            if not files:
+                return False
+            for f in files:
+                name = (f.get('name') or '').replace('\\', '/')
+                if name.count('/') >= 2:
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"获取种子文件列表失败，按有嵌套处理: {e}")
+            return True
+
+    def _has_any_folder(self, client, torrent_hash: str) -> bool:
+        """是否带有目录（任意文件路径中含至少 1 个 '/' 即视为带目录；仅根目录单/多文件为 False）"""
+        try:
+            files = client.get_torrent_files(torrent_hash)
+            if not files:
+                return False
+            for f in files:
+                name = (f.get('name') or '').replace('\\', '/')
+                if '/' in name:
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"获取种子文件列表失败，按带目录处理: {e}")
+            return True
+
     def _handle_completed_task(self, client, task: dict, torrent_hash: str, torrent_info: dict) -> str | None:
         """处理已完成任务：先重命名，再移动或复制。返回建议的最终状态(如 'completed')，返回 None 则保持原定状态"""
         file_tasks = []
@@ -245,11 +275,11 @@ class TaskMonitor:
                         break
             
             use_copy = config.get("qbittorrent.file_handling.use_copy", False)
-            # use_copy 时：单文件用 qB 移动，多文件用本程序复制
-            is_single = self._is_single_file_torrent(client, torrent_hash)
-            use_qb_move = (use_copy and is_single) or (not use_copy)
+            # 仅当所有文件在根目录（不带目录）时 qB 移动才只移文件；带目录则用复制以便只拷文件到目标
+            has_any_folder = self._has_any_folder(client, torrent_hash)
+            use_qb_move = (use_copy and not has_any_folder) or (not use_copy)
             if use_qb_move:
-                logger.info(f"任务 {task['id']} 使用 qB 移动 (use_copy={use_copy}, 单文件={is_single})")
+                logger.info(f"任务 {task['id']} 使用 qB 移动 (use_copy={use_copy}, 仅根目录文件={not has_any_folder})")
                 is_moved, local_path, qb_path = self._maybe_move_location(client, task['id'], torrent_hash, torrent_info, final_target_path)
                 if is_moved:
                     self._verify_move(client, torrent_hash, local_path, qb_path, file_tasks)
