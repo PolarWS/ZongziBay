@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import Search from '~/components/Search.vue'
 import { Button } from '@/components/ui/button'
-import { Activity, ExternalLink } from 'lucide-vue-next'
+import { Activity, ExternalLink, Film, Sparkles, Tv } from 'lucide-vue-next'
 
-// 首页搜索类型：电影 / 剧集，用于搜索框与跳转
+// 首页搜索类型：电影 / 剧集，用于搜索框与跳转（可从设置页偏好恢复）
+const DEFAULT_TYPE_KEY = 'zongzi_default_type'
 const type = ref<'movie' | 'tv'>('tv')
 const onChangeType = (v: 'movie' | 'tv') => {
   type.value = v
 }
+onMounted(() => {
+  const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(DEFAULT_TYPE_KEY) : null
+  if (saved === 'movie' || saved === 'tv') type.value = saved
+})
 </script>
 
 <template>
@@ -30,19 +35,32 @@ const onChangeType = (v: 'movie' | 'tv') => {
                         size="lg" 
                         :variant="type === 'movie' ? 'default' : 'outline'"
                         @click="onChangeType('movie')"
-                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300"
+                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 inline-flex items-center gap-2"
                         :class="type === 'movie' ? 'hover:brightness-110 hover:shadow-lg hover:scale-105' : 'hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105'"
                     >
+                        <Film class="h-4 w-4" />
                         电影
                     </Button>
                     <Button 
                         size="lg" 
                         :variant="type === 'tv' ? 'default' : 'outline'"
                         @click="onChangeType('tv')"
-                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300"
+                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 inline-flex items-center gap-2"
                         :class="type === 'tv' ? 'hover:brightness-110 hover:shadow-lg hover:scale-105' : 'hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105'"
                     >
+                        <Tv class="h-4 w-4" />
                         剧集
+                    </Button>
+                    <Button 
+                        size="lg" 
+                        variant="outline"
+                        as-child
+                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105"
+                    >
+                        <NuxtLink to="/recommend" class="inline-flex items-center gap-2">
+                            <Sparkles class="h-4 w-4" />
+                            推荐
+                        </NuxtLink>
                     </Button>
                 </div>
 

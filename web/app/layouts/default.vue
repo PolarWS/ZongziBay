@@ -32,9 +32,11 @@ const { logout } = useAuth()
             <LogOut class="h-5 w-5" />
             <span class="sr-only">退出登录</span>
           </Button>
-          <Button variant="ghost" size="icon">
-            <Settings class="h-5 w-5" />
-            <span class="sr-only">Settings</span>
+          <Button variant="ghost" size="icon" as-child>
+            <NuxtLink to="/settings">
+              <Settings class="h-5 w-5" />
+              <span class="sr-only">Settings</span>
+            </NuxtLink>
           </Button>
         </div>
       </div>

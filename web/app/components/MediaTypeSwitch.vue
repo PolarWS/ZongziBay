@@ -10,7 +10,7 @@ watch(selectedValue, (v) => {
 </script>
 
 <template>
-  <div class="inline-flex h-12 rounded-lg bg-input/50 p-0.5">
+  <div class="inline-flex h-12 rounded-lg bg-input/50 p-0.5 text-foreground">
     <RadioGroup
       v-model="selectedValue"
       :data-state="selectedValue"

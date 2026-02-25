@@ -40,25 +40,35 @@ const q = computed(() => (route.query.q as string) || '')
 const tmdbName = computed(() => (route.query.tmdbName as string) || '')
 const tmdbYear = computed(() => (route.query.tmdbYear as string) || '')
 
+// 年份筛选（可选），同步到 URL；优先从 tmdbYear 回填
+const year = ref('')
+watch([() => route.query.year, tmdbYear], ([urlYear, tmdb]) => {
+  const fromUrl = String(urlYear ?? '')
+  const fromTmdb = String(tmdb ?? '')
+  if (fromUrl) year.value = fromUrl
+  else if (fromTmdb) year.value = fromTmdb
+  else if (!year.value) year.value = ''
+}, { immediate: true })
+
 // 从关键词中解析 SxxExx / Sxx / Exx 并回填到季/集输入框
 const initFromQ = () => {
   const currentQ = q.value
   let match = currentQ.match(/(.+?)\s+S(\d+)E(\d+)/i)
   if (match) {
-    season.value = match[2]
-    episode.value = match[3]
+    season.value = match[2] ?? ''
+    episode.value = match[3] ?? ''
     return
   }
   match = currentQ.match(/(.+?)\s+S(\d+)/i)
   if (match) {
-    season.value = match[2]
+    season.value = match[2] ?? ''
     episode.value = ''
     return
   }
   match = currentQ.match(/(.+?)\s+E(\d+)/i)
   if (match) {
     season.value = ''
-    episode.value = match[2]
+    episode.value = match[2] ?? ''
     return
   }
   season.value = ''
@@ -101,7 +111,7 @@ const formatAdded = (s: string) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// 应用季/集筛选：拼成新关键词并写回路由
+// 应用季/集与年份筛选：拼成新关键词并写回路由，再请求
 const onApplyFilter = () => {
   let base = q.value
   base = base.replace(/\s+S\d+E\d+/i, '')
@@ -117,24 +127,30 @@ const onApplyFilter = () => {
       suffix += `E${e}`
     }
   }
-  if (suffix) {
-    const newQ = `${base}${suffix}`
-    router.replace({ query: { ...route.query, q: newQ } })
-  } else {
-    router.replace({ query: { ...route.query, q: base } })
-  }
+  const newQ = suffix ? `${base}${suffix}` : base
+  const newYear = (year.value && String(year.value).trim()) || undefined
+  const query = { ...route.query, q: newQ } as Record<string, string>
+  if (newYear) query.year = newYear
+  else delete query.year
+  router.replace({ query }).then(() => {
+    fetchData()
+  })
 }
 
-// 清除季/集后重新应用筛选
+// 清除季/集和年份后重新应用筛选
 const onClearFilter = () => {
   season.value = ''
   episode.value = ''
+  year.value = ''
   onApplyFilter()
 }
 
-// 请求海盗湾搜索接口
+// 请求海盗湾搜索接口（关键词 + 可选年份）
 const fetchData = async () => {
-  const query = q.value.trim()
+  const baseQ = q.value.trim()
+  // 仅当用户点击「筛选」写入的 year 才参与搜索，不用 tmdbYear 默认带出
+const yearPart = (route.query.year as string)?.trim() || ''
+  const query = [baseQ, yearPart].filter(Boolean).join(' ')
   if (!query) {
     items.value = []
     return
@@ -192,7 +208,17 @@ const openMagnetPage = (it: API.PirateBayTorrent) => {
     <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2 sm:gap-4">
       <h1 class="text-lg font-semibold truncate min-w-0">海盗湾搜索：{{ q || '—' }}</h1>
       
-      <div class="flex items-center gap-2 shrink-0">
+      <div class="flex flex-wrap items-center gap-2 shrink-0">
+        <div class="flex items-center gap-1">
+          <span class="text-sm font-medium">年份</span>
+          <Input
+            v-model="year"
+            class="w-14 h-8 px-2 text-center"
+            placeholder="可选"
+            maxlength="4"
+            @keyup.enter="onApplyFilter"
+          />
+        </div>
         <div class="flex items-center gap-1">
             <span class="text-sm font-medium">S</span>
             <Input v-model="season" class="w-12 h-8 px-1 text-center" placeholder="01" @keyup.enter="onApplyFilter" />

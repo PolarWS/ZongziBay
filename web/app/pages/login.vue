@@ -123,6 +123,7 @@ const handleLogin = async () => {
   position: relative;
   overflow: hidden;
   background: var(--background);
+  color: var(--foreground);
 }
 
 /* 背景层 */

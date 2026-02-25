@@ -80,7 +80,14 @@
   --foreground: oklch(0.129 0.042 264.695);
 }
 
+html {
+  color: var(--foreground);
+  background-color: var(--background);
+}
+
 body {
+  color: var(--foreground);
+  background-color: var(--background);
   padding-right: 0 !important;
 }
 

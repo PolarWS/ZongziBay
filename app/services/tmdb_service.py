@@ -1,7 +1,9 @@
 import logging
+import os
 from typing import Any, List, Optional
 
-from tmdbv3api import TMDb, Movie, TV, Search
+import requests
+from tmdbv3api import TMDb, Movie, TV, Search, Trending
 
 from app.core.config import config
 
@@ -34,6 +36,7 @@ class TMDBService:
         self.movie = Movie()
         self.tv = TV()
         self.search = Search()
+        self.trending = Trending()
 
     @staticmethod
     def _extract_results(raw) -> List[Any]:
@@ -171,6 +174,80 @@ class TMDBService:
         except Exception as e:
             logger.debug("获取剧集英文标题 alternative_titles 失败 tv_id=%s: %s", tv_id, e)
             return None
+
+    @staticmethod
+    def _total_from_raw(raw: Any, fallback: int) -> int:
+        """从 TMDB 列表响应或环境变量取 total_results（tmdbv3api 会把 total_results 写入 os.environ）"""
+        total = getattr(raw, "total_results", None)
+        if total is None:
+            try:
+                total = os.environ.get("total_results")
+            except Exception:
+                pass
+        try:
+            return int(total) if total is not None else fallback
+        except (TypeError, ValueError):
+            return fallback
+
+    def get_trending_movies(self, page: int = 1, window: str = "week") -> tuple:
+        """热播电影，window: day | week，返回 (list, total)"""
+        try:
+            raw = self.trending.movie_day(page=page) if window == "day" else self.trending.movie_week(page=page)
+            results = self._extract_results(raw)
+            return results, self._total_from_raw(raw, len(results))
+        except requests.RequestException as e:
+            logger.warning("TMDB 热播电影请求失败: %s", e)
+            return [], 0
+
+    def get_trending_tv(self, page: int = 1, window: str = "week") -> tuple:
+        """热播剧集，window: day | week，返回 (list, total)"""
+        try:
+            raw = self.trending.tv_day(page=page) if window == "day" else self.trending.tv_week(page=page)
+            results = self._extract_results(raw)
+            return results, self._total_from_raw(raw, len(results))
+        except requests.RequestException as e:
+            logger.warning("TMDB 热播剧集请求失败: %s", e)
+            return [], 0
+
+    def get_popular_movies(self, page: int = 1) -> tuple:
+        """热门电影，返回 (list, total)"""
+        try:
+            raw = self.movie.popular(page=page)
+            results = self._extract_results(raw) if not isinstance(raw, list) else raw
+            return results, self._total_from_raw(raw, len(results))
+        except requests.RequestException as e:
+            logger.warning("TMDB 热门电影请求失败: %s", e)
+            return [], 0
+
+    def get_popular_tv(self, page: int = 1) -> tuple:
+        """热门剧集，返回 (list, total)"""
+        try:
+            raw = self.tv.popular(page=page)
+            results = self._extract_results(raw) if not isinstance(raw, list) else raw
+            return results, self._total_from_raw(raw, len(results))
+        except requests.RequestException as e:
+            logger.warning("TMDB 热门剧集请求失败: %s", e)
+            return [], 0
+
+    def get_top_rated_movies(self, page: int = 1) -> tuple:
+        """高分电影，返回 (list, total)"""
+        try:
+            raw = self.movie.top_rated(page=page)
+            results = self._extract_results(raw) if not isinstance(raw, list) else raw
+            return results, self._total_from_raw(raw, len(results))
+        except requests.RequestException as e:
+            logger.warning("TMDB 高分电影请求失败: %s", e)
+            return [], 0
+
+    def get_top_rated_tv(self, page: int = 1) -> tuple:
+        """高分剧集，返回 (list, total)"""
+        try:
+            raw = self.tv.top_rated(page=page)
+            results = self._extract_results(raw) if not isinstance(raw, list) else raw
+            return results, self._total_from_raw(raw, len(results))
+        except requests.RequestException as e:
+            logger.warning("TMDB 高分剧集请求失败: %s", e)
+            return [], 0
 
     def get_search_suggestions(self, query: str, limit: int = 10, media_type: str = "") -> List[str]:
         """获取搜索补全提示，支持按类型过滤"""
