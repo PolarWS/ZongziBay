@@ -426,8 +426,8 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
            
            <div class="space-y-2">
               <h4 class="font-medium text-foreground">任务信息</h4>
-              <div class="rounded-md bg-zinc-950 p-4 min-w-0 overflow-x-auto max-w-full">
-                <pre class="text-xs text-zinc-300 font-mono whitespace-pre-wrap break-words">{{ selected?.taskInfo || '无额外信息' }}</pre>
+              <div class="rounded-md bg-muted/80 p-4 min-w-0 overflow-x-auto max-w-full">
+                <pre class="text-xs text-foreground font-mono whitespace-pre-wrap break-words">{{ selected?.taskInfo || '无额外信息' }}</pre>
               </div>
            </div>
         </div>

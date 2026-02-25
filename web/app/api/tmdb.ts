@@ -73,6 +73,72 @@ export async function searchTvApiV1TmdbSearchTvGet(
   );
 }
 
+/** 热播电影 GET /api/v1/tmdb/trending/movie */
+export async function getTrendingMoviesApiV1TmdbTrendingMovieGet(
+  params?: { page?: number; window?: 'day' | 'week' },
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseTMDBMovieListResponse_>(
+    "/api/v1/tmdb/trending/movie",
+    { method: "GET", params: { page: 1, window: "week", ...params }, ...(options || {}) }
+  );
+}
+
+/** 热播剧集 GET /api/v1/tmdb/trending/tv */
+export async function getTrendingTvApiV1TmdbTrendingTvGet(
+  params?: { page?: number; window?: 'day' | 'week' },
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseTMDBTVListResponse_>(
+    "/api/v1/tmdb/trending/tv",
+    { method: "GET", params: { page: 1, window: "week", ...params }, ...(options || {}) }
+  );
+}
+
+/** 热门电影 GET /api/v1/tmdb/popular/movie */
+export async function getPopularMoviesApiV1TmdbPopularMovieGet(
+  params?: { page?: number },
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseTMDBMovieListResponse_>(
+    "/api/v1/tmdb/popular/movie",
+    { method: "GET", params: { page: 1, ...params }, ...(options || {}) }
+  );
+}
+
+/** 热门剧集 GET /api/v1/tmdb/popular/tv */
+export async function getPopularTvApiV1TmdbPopularTvGet(
+  params?: { page?: number },
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseTMDBTVListResponse_>(
+    "/api/v1/tmdb/popular/tv",
+    { method: "GET", params: { page: 1, ...params }, ...(options || {}) }
+  );
+}
+
+/** 高分电影 GET /api/v1/tmdb/list/top_rated/movie */
+export async function getTopRatedMoviesApiV1TmdbTopRatedMovieGet(
+  params?: { page?: number },
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseTMDBMovieListResponse_>(
+    "/api/v1/tmdb/list/top_rated/movie",
+    { method: "GET", params: { page: 1, ...params }, ...(options || {}) }
+  );
+}
+
+/** 高分剧集 GET /api/v1/tmdb/list/top_rated/tv */
+export async function getTopRatedTvApiV1TmdbTopRatedTvGet(
+  params?: { page?: number },
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseTMDBTVListResponse_>(
+    "/api/v1/tmdb/list/top_rated/tv",
+    { method: "GET", params: { page: 1, ...params }, ...(options || {}) }
+  );
+}
+
 /** 搜索提示补全 根据输入返回搜索建议（标题补全） GET /api/v1/tmdb/suggestions */
 export async function getSuggestionsApiV1TmdbSuggestionsGet(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
