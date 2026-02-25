@@ -382,60 +382,99 @@ export function extractYearFromFiles(files: RenameFile[]): string {
 
 // ─── 主重命名逻辑 ────────────────────────────────────────────────
 
+/** 智能重命名可用的占位符：{name} {year} {season} {ss} {episode} {ee} {extra} {sub_suffix} {ext} */
+export type RenameTemplates = { movie?: string; tv?: string; anime?: string }
+
+function applyTemplate(tpl: string, vars: Record<string, string>): string {
+  let out = tpl
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.replace(new RegExp(`\\{${key}\\}`, 'g'), value ?? '')
+  }
+  return out
+}
+
 /**
  * 根据媒体类型与 TMDB 元数据对文件进行智能重命名。
  * 直接修改各 file.newName。
+ * 若传入 templates，则优先用 config 中的模板（占位符：{name} {year} {season} {ss} {episode} {ee} {extra} {sub_suffix} {ext}）；否则使用内置默认格式。
  *
  * @param files    - 文件列表（会改写 newName）
  * @param type     - 'movie' | 'tv' | 'anime' | 'default'
  * @param tmdbName - TMDB 中文名
  * @param tmdbYear - 上映年份（仅电影使用）
+ * @param templates - 可选，从 config smart_rename 获取的模板
  */
 export function performSmartRename(
   files: RenameFile[],
   type: MediaType,
   tmdbName: string,
   tmdbYear?: string,
+  templates?: RenameTemplates,
 ): void {
   if (!tmdbName) return
 
   const name = tmdbName.trim()
   const year = tmdbYear?.trim() || ''
 
+  const template = type !== 'default' ? templates?.[type] : undefined
+
   for (const file of files) {
     const originalName = file.name || file.path || ''
     const ext = getExt(originalName)
 
-    // 仅对媒体文件（视频+字幕）重命名
     if (!isMediaFile(ext)) continue
 
-    // 从文件完整路径中拆出文件夹路径
     const pathParts = (file.path || '').replace(/\\/g, '/').split('/')
     const folderPath = pathParts.length > 1
       ? pathParts.slice(0, -1).join('/')
       : ''
 
+    const extra = getExtraType(originalName)
+    const subSuffix = getSubtitleLanguageSuffix(originalName, ext)
+
+    if (template && (type === 'movie' || type === 'tv' || type === 'anime')) {
+      const vars: Record<string, string> = {
+        name,
+        year,
+        season: '',
+        ss: '',
+        episode: '',
+        ee: '',
+        extra,
+        sub_suffix: subSuffix,
+        ext,
+      }
+      if (type === 'movie') {
+        file.newName = applyTemplate(template, vars)
+        continue
+      }
+      const se = parseSeasonEpisode(originalName, folderPath)
+      if (se) {
+        vars.season = String(se.season)
+        vars.ss = pad2(se.season)
+        vars.episode = String(se.episode)
+        vars.ee = pad2(se.episode)
+        file.newName = applyTemplate(template, vars)
+      } else {
+        file.newName = `${name}/${originalName}`
+      }
+      continue
+    }
+
+    // 无自定义模板时使用内置格式
     if (type === 'movie') {
-      // ─── Movie: 名称 (年份)/名称 (年份)[ - PV01][ - 字幕语言].ext ───
       const label = year ? `${name} (${year})` : name
-      const extra = getExtraType(originalName)
-      const subSuffix = getSubtitleLanguageSuffix(originalName, ext)
       file.newName = `${label}/${label}${extra}${subSuffix}${ext}`
     } else if (type === 'tv' || type === 'anime') {
-      // ─── TV / Anime: 名称/Season XX/名称 SXXEXX[ - PV].ext ───
       const se = parseSeasonEpisode(originalName, folderPath)
-      const extra = getExtraType(originalName)
-      const subSuffix = getSubtitleLanguageSuffix(originalName, ext)
       if (se) {
         const ss = pad2(se.season)
         const ee = pad2(se.episode)
-        // 文件夹：季不补零（Season 5）；文件名：保持 S05E01
         file.newName = `${name}/Season ${se.season}/${name} S${ss}E${ee}${extra}${subSuffix}${ext}`
       } else {
         file.newName = `${name}/${originalName}`
       }
     } else {
-      // 默认：仅放入名称文件夹下
       file.newName = `${name}/${originalName}`
     }
   }

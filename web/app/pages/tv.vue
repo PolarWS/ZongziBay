@@ -122,7 +122,7 @@ const goSearch = async (it: API.TMDBTV) => {
       <div
         v-for="it in items"
         :key="it.id"
-        class="group relative rounded-xl border border-border bg-card shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md hover:-translate-y-1 hover:border-primary/50 cursor-pointer"
+        class="group relative rounded-xl border border-border bg-card shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md hover:-translate-y-1 hover:border-primary/50 cursor-pointer flex flex-col h-full"
         @click="goSearch(it)"
       >
         <div class="aspect-[2/3] overflow-hidden bg-muted">
@@ -137,10 +137,10 @@ const goSearch = async (it: API.TMDBTV) => {
             无海报
           </div>
         </div>
-        <div class="p-3 sm:p-4 space-y-1 bg-card flex flex-col min-h-[100px] sm:min-h-[120px]">
-          <div class="text-base font-semibold truncate shrink-0 group-hover:text-primary transition-colors">{{ it.name || it.original_name || '未命名' }}</div>
+        <div class="p-3 sm:p-4 space-y-1 bg-card flex flex-col flex-1 min-h-0">
+          <div class="text-base font-semibold break-words line-clamp-3 leading-snug group-hover:text-primary transition-colors">{{ it.name || it.original_name || '未命名' }}</div>
           <div class="text-xs text-muted-foreground font-mono shrink-0">{{ it.first_air_date || '—' }}</div>
-          <div class="pt-2 text-xs text-muted-foreground/80 line-clamp-4 leading-relaxed overflow-hidden flex-1">{{ it.overview || '暂无简介' }}</div>
+          <div class="pt-2 text-xs text-muted-foreground/80 line-clamp-4 leading-relaxed overflow-hidden flex-1 min-h-0">{{ it.overview || '暂无简介' }}</div>
         </div>
       </div>
     </div>

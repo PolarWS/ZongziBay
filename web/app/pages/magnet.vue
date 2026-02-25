@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { parseMagnetApiV1MagnetParsePost } from '@/api/magnet'
 import { addTaskApiV1TasksAddPost } from '@/api/tasks'
-import { getPathConfigApiV1SystemPathsGet as getSystemPaths } from '@/api/system'
+import { getPathConfigApiV1SystemPathsGet as getSystemPaths, getRenameTemplatesApiV1SystemRenameTemplatesGet } from '@/api/system'
 import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
 import AppEmpty from '@/components/AppEmpty.vue'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,14 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   ArrowUpCircle,
   ArrowDownCircle,
@@ -23,7 +31,8 @@ import {
   Settings,
   FolderOpen,
   List,
-  FolderTree
+  FolderTree,
+  Pencil,
 } from 'lucide-vue-next'
 
 import { performSmartRename, getExt, extractYearFromFiles } from '@/utils/renamer'
@@ -42,6 +51,16 @@ const loading = ref(false)
 const errMsg = ref<string | null>(null)
 const files = ref<(API.MagnetFile & { newName: string; checked: boolean })[]>([])
 const systemPaths = ref<any>({})
+const renameTemplates = ref<{ movie?: string; tv?: string; anime?: string }>({})
+const renameTemplateDialogOpen = ref(false)
+const editRenameMovie = ref('')
+const editRenameTv = ref('')
+const editRenameAnime = ref('')
+/** 自定义替换内容（留空则用页面 TMDB 名称/年份） */
+const customRenameName = ref('')
+const customRenameYear = ref('')
+const editRenameName = ref('')
+const editRenameYear = ref('')
 const history = ref<string[]>([])
 const customKeywords = ref<string[]>([])
 const newKeyword = ref('')
@@ -225,12 +244,18 @@ const fetchFiles = async () => {
   }
 }
 
-// 获取系统路径配置
+// 获取系统路径配置与智能重命名模板
 const fetchPaths = async () => {
   try {
-    const res = await getSystemPaths()
-    if (res && res.code === 200) {
-      systemPaths.value = res.data || {}
+    const [pathsRes, templatesRes] = await Promise.all([
+      getSystemPaths(),
+      getRenameTemplatesApiV1SystemRenameTemplatesGet(),
+    ])
+    if (pathsRes && pathsRes.code === 200) {
+      systemPaths.value = pathsRes.data || {}
+    }
+    if (templatesRes && templatesRes.code === 200 && templatesRes.data) {
+      renameTemplates.value = templatesRes.data
     }
   } catch (e) {
     console.error(e)
@@ -296,10 +321,41 @@ const toggleKeyword = (keyword: string) => {
   })
 }
 
-// 智能重命名并保存历史
+// 智能重命名并保存历史（使用 config 中的模板与自定义内容）
 const smartRename = () => {
   saveHistory()
-  performSmartRename(files.value, selectedType.value as 'movie' | 'tv' | 'anime' | 'default', tmdbName.value || info.value.name, editableYear.value)
+  const name = (customRenameName.value?.trim() || tmdbName.value || info.value.name || '').trim()
+  const year = (customRenameYear.value?.trim() || editableYear.value || '').trim()
+  performSmartRename(
+    files.value,
+    selectedType.value as 'movie' | 'tv' | 'anime' | 'default',
+    name,
+    year || undefined,
+    renameTemplates.value,
+  )
+}
+
+// 打开智能重命名模板弹窗：模板用 config/会话缓存，内容用当前页面识别结果预填（可修改）
+const openRenameTemplateDialog = () => {
+  editRenameMovie.value = renameTemplates.value.movie ?? ''
+  editRenameTv.value = renameTemplates.value.tv ?? ''
+  editRenameAnime.value = renameTemplates.value.anime ?? ''
+  // 资源名、年份：优先用当前页面已识别/输入的值，便于用户看到并修改
+  editRenameName.value = (customRenameName.value || tmdbName.value || info.value?.name || '').trim()
+  editRenameYear.value = (customRenameYear.value || editableYear.value || '').trim()
+  renameTemplateDialogOpen.value = true
+}
+
+// 确认并应用自定义模板与内容（仅当次会话生效）
+const confirmRenameTemplateDialog = () => {
+  renameTemplates.value = {
+    movie: editRenameMovie.value.trim() || undefined,
+    tv: editRenameTv.value.trim() || undefined,
+    anime: editRenameAnime.value.trim() || undefined,
+  }
+  customRenameName.value = editRenameName.value.trim() || ''
+  customRenameYear.value = editRenameYear.value.trim() || ''
+  renameTemplateDialogOpen.value = false
 }
 
 // 确认添加任务并跳转首页
@@ -523,6 +579,15 @@ const onCancel = () => {
             <Button size="sm" variant="outline" class="h-8 text-xs px-3" @click="smartRename">
               智能重命名
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              class="h-8 w-8 p-0 shrink-0"
+              title="自定义重命名模板"
+              @click="openRenameTemplateDialog"
+            >
+              <Pencil class="w-4 h-4" />
+            </Button>
             <Button 
               v-if="canUndo"
               size="sm" 
@@ -643,4 +708,84 @@ const onCancel = () => {
       </div>
     </div>
   </div>
+
+  <!-- 智能重命名模板自定义弹窗 -->
+  <Dialog v-model:open="renameTemplateDialogOpen">
+    <DialogContent class="max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>自定义重命名模板</DialogTitle>
+        <DialogDescription>
+          修改后仅当次会话生效，下次进入页面会从 config 重新加载。下方占位符会在重命名时被替换。
+        </DialogDescription>
+      </DialogHeader>
+      <div class="space-y-4 py-2">
+        <div class="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
+          <div class="font-medium text-foreground mb-1.5">占位符</div>
+          <div class="flex flex-wrap gap-x-3 gap-y-1">
+            <span><code class="bg-muted px-1 rounded">{name}</code> 资源名</span>
+            <span><code class="bg-muted px-1 rounded">{year}</code> 年份</span>
+            <span><code class="bg-muted px-1 rounded">{season}</code> 季数</span>
+            <span><code class="bg-muted px-1 rounded">{ss}</code> 季数补零2位</span>
+            <span><code class="bg-muted px-1 rounded">{episode}</code> 集数</span>
+            <span><code class="bg-muted px-1 rounded">{ee}</code> 集数补零2位</span>
+            <span><code class="bg-muted px-1 rounded">{extra}</code> PV/Menu等</span>
+            <span><code class="bg-muted px-1 rounded">{sub_suffix}</code> 字幕后缀</span>
+            <span><code class="bg-muted px-1 rounded">{ext}</code> 扩展名</span>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <Label class="text-xs">电影 (movie)</Label>
+          <Input
+            v-model="editRenameMovie"
+            class="font-mono text-xs"
+            placeholder="{name} ({year})/{name} ({year}){extra}{sub_suffix}{ext}"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label class="text-xs">剧集 (tv)</Label>
+          <Input
+            v-model="editRenameTv"
+            class="font-mono text-xs"
+            placeholder="{name}/Season {season}/{name} S{ss}E{ee}{extra}{sub_suffix}{ext}"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label class="text-xs">番剧 (anime)</Label>
+          <Input
+            v-model="editRenameAnime"
+            class="font-mono text-xs"
+            placeholder="{name}/Season {season}/{name} S{ss}E{ee}{extra}{sub_suffix}{ext}"
+          />
+        </div>
+        <div class="border-t border-border pt-4 space-y-3">
+          <div class="font-medium text-sm text-foreground">替换内容（已按当前页面识别预填，可修改）</div>
+          <p class="text-xs text-muted-foreground">
+            下方为当前识别到的资源名与年份，可直接修改；智能重命名时将用此处内容替换模板中的 {name}、{year}。
+          </p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label class="text-xs">资源名（对应 {name}）</Label>
+              <Input
+                v-model="editRenameName"
+                class="text-xs"
+                placeholder="如：进击的巨人"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label class="text-xs">年份（对应 {year}，电影常用）</Label>
+              <Input
+                v-model="editRenameYear"
+                class="text-xs"
+                placeholder="如：2023"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" @click="renameTemplateDialogOpen = false">取消</Button>
+        <Button @click="confirmRenameTemplateDialog">确定</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>

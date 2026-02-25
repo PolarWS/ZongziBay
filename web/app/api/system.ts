@@ -12,6 +12,16 @@ export async function getPathConfigApiV1SystemPathsGet(options?: {
   });
 }
 
+/** Get Rename Templates 获取智能重命名模板 GET /api/v1/system/rename-templates */
+export async function getRenameTemplatesApiV1SystemRenameTemplatesGet(options?: {
+  [key: string]: any;
+}) {
+  return request<API.BaseResponse & { data?: { movie?: string; tv?: string; anime?: string } }>(
+    "/api/v1/system/rename-templates",
+    { method: "GET", ...(options || {}) }
+  )
+}
+
 /** Get Trackers 获取 BT Tracker 列表 GET /api/v1/system/trackers */
 export async function getTrackersApiV1SystemTrackersGet(options?: {
   [key: string]: any;

@@ -1,6 +1,7 @@
 import logging
 import os
 import sqlite3
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -9,10 +10,12 @@ from app.schemas.notification import NotificationType
 
 logger = logging.getLogger(__name__)
 
+
 class Database:
     """
     数据库管理类 (SQLite)
-    负责数据库连接、初始化以及所有的数据 CRUD 操作
+    负责数据库连接、初始化以及所有的数据 CRUD 操作。
+    使用线程本地连接，避免多请求共用同一连接导致的串行等待，API 之间互不阻塞。
     """
 
     def __init__(self):
@@ -22,15 +25,15 @@ class Database:
         self.db_path = path_cfg if os.path.isabs(path_cfg) else os.path.join(root_dir, path_cfg)
         self.schema_path = os.path.join(root_dir, "sql", "main.sql")
         if not os.path.exists(self.schema_path):
-             self.schema_path = os.path.join(root_dir, "sql", "create_table.sql")
-        self.conn = None
+            self.schema_path = os.path.join(root_dir, "sql", "create_table.sql")
+        self._local = threading.local()
 
     def get_conn(self) -> sqlite3.Connection:
-        """获取数据库连接"""
-        if self.conn is None:
-            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self.conn.row_factory = sqlite3.Row
-        return self.conn
+        """获取当前线程的数据库连接（每线程一个，避免多请求互相阻塞）"""
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            self._local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._local.conn.row_factory = sqlite3.Row
+        return self._local.conn
 
     def init_db(self) -> None:
         """
