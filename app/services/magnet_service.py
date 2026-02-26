@@ -138,7 +138,7 @@ class MagnetService:
         except Exception as e:
             raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"检查已有种子失败: {e}")
 
-        temp_dir = config.get("magnet.temp_dir")
+        temp_dir = config.get("paths.temp_download_path") or config.get("magnet.temp_dir")
         if save_path:
             target_path = save_path
         elif temp_dir:
