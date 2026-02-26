@@ -50,9 +50,12 @@ anime_garden:
   # teams_url 不配置时自动取 url 的 base + /teams，用于获取字幕组列表
   page_size: 20                               # 每页数量
 
-# 磁力链接相关配置
-magnet:
-  temp_dir: "/temp"           # 磁力链接解析时的临时目录
+# 字幕服务
+subtitle:
+  # ASSRT字幕站
+  assrt:
+    token: "YOUR_ASSRT_TOKEN"   # 32 位，注册后在用户面板查看
+    base_url: "https://api.assrt.net"   # 国内可用 https://api.makedie.me
 
 # 数据库配置
 database:
@@ -74,6 +77,8 @@ paths:
   movie_download_path: "/temp"    # 电影下载保存路径
   tv_download_path: "/temp"       # 电视剧下载保存路径
   anime_download_path: "/temp"    # 番剧下载保存路径
+  subtitle_download_path: "/temp" # 字幕下载保存路径
+  temp_download_path: "/temp"     # 磁力解析等临时目录
 
   # --- 归档路径配置 (整理刮削后的最终存储位置) ---
   default_target_path: "/nas/movies"   # 默认归档路径

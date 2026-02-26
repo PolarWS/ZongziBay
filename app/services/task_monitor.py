@@ -24,11 +24,10 @@ class TaskMonitor:
         self._stop_event = threading.Event()
 
     def start(self):
-        """启动监控线程"""
+        """启动监控线程（无 qB 时也启动，以便处理字幕等非 qB 任务）"""
         if not self.running:
             if not self._check_connection():
-                logger.error("无法连接到 qBittorrent，任务监控服务未启动。请检查配置或服务状态。")
-                return
+                logger.warning("无法连接到 qBittorrent，种子任务将暂不处理；字幕等 HTTP 下载任务仍会照常处理。")
             self.running = True
             self._stop_event.clear()
             self.thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -72,20 +71,32 @@ class TaskMonitor:
             return
 
         client = magnet_service._get_client()
-        if not client:
-            logger.warning("无法连接 qBittorrent，跳过本次检查")
-            return
 
         for task in active_tasks:
             try:
                 torrent_hash = self._extract_torrent_hash(task['taskName'], task.get('sourceUrl', ''))
                 if not torrent_hash:
-                    logger.warning(f"无法获取任务 {task['id']} 的 Hash，跳过检查。Name={task['taskName']}")
+                    # 字幕任务：HTTP 下载后由本程序加入队列，此处只做移动/重命名
+                    if (task.get('sourceUrl') or '').startswith('subtitle:') and task.get('taskStatus') == 'moving':
+                        try:
+                            self._handle_subtitle_task(task)
+                        except Exception as e:
+                            logger.error(f"字幕任务 {task['id']} 处理失败: {e}")
+                            db.insert_notification(
+                                title="字幕任务处理失败",
+                                content=f"任务 {task['taskName']} 移动/重命名失败: {e}",
+                                type=NotificationType.ERROR.value,
+                            )
+                    else:
+                        logger.warning(f"无法获取任务 {task['id']} 的 Hash，跳过检查。Name={task['taskName']}")
                     continue
                 # qBittorrent API 只认 40 位 hex，若仍是 32 位 Base32 则再规范化一次（兼容旧数据或未规范化的来源）
                 if len(torrent_hash) == 32:
                     torrent_hash = normalize_info_hash(torrent_hash)
 
+                if not client:
+                    logger.warning("无法连接 qBittorrent，跳过种子任务检查")
+                    continue
                 torrent_info = client.get_torrent_info(torrent_hash)
                 if not torrent_info:
                     if task['taskStatus'] == 'cancelled':  # 取消后 qB 已删除，正常忽略
@@ -158,6 +169,75 @@ class TaskMonitor:
                     db.update_task_status(task['id'], new_status, progress)
             except Exception as e:
                 logger.error(f"检查任务 {task.get('id')} 失败: {e}")
+
+    def _handle_subtitle_task(self, task: dict) -> None:
+        """字幕任务：将已下载到 sourcePath 的文件复制到 targetPath 并重命名。"""
+        file_tasks = db.get_file_tasks(task["id"])
+        if not file_tasks:
+            logger.warning(f"字幕任务 {task['id']} 无文件任务，直接标记完成")
+            db.update_task_status(task["id"], "completed")
+            return
+        default_target = config.get("paths.default_target_path", "")
+        task_target = (task.get("targetPath") or "").replace("\\", "/").strip()
+        if task_target and not (os.path.isabs(task_target) or (len(task_target) > 1 and task_target[1] == ":")):
+            base_dir = os.path.join(default_target, task_target) if default_target else task_target
+        else:
+            base_dir = task_target or default_target
+        base_dir = base_dir.replace("\\", "/")
+        source_base = (task.get("sourcePath") or "").replace("\\", "/").strip()
+        logger.info("字幕任务 targetPath=%s -> base_dir=%s (将解析为本地路径)", task_target or "(空)", base_dir)
+        if not source_base or not os.path.exists(source_base):
+            logger.error(f"字幕任务 {task['id']} 源目录不存在: {source_base}")
+            db.insert_notification(
+                title="字幕任务失败",
+                content=f"源目录不存在: {source_base}",
+                type=NotificationType.ERROR.value,
+            )
+            return
+        for ft in file_tasks:
+            src_name = (ft.get("sourcePath") or "").replace("\\", "/").strip()
+            dest_name = (ft.get("file_rename") or "").strip() or src_name
+            ft_target = (ft.get("targetPath") or "").replace("\\", "/").strip()
+            if not src_name:
+                continue
+            src_full = os.path.normpath(os.path.join(source_base, src_name))
+            if not os.path.exists(src_full):
+                logger.warning(f"字幕任务 {task['id']} 源文件不存在: {src_full}")
+                db.update_file_task_status(ft["id"], "failed", "源文件不存在")
+                continue
+            dest_dir = os.path.join(base_dir, ft_target) if ft_target else base_dir
+            dest_dir = dest_dir.replace("\\", "/")
+            dest_dir = self._resolve_path_for_local(dest_dir, for_target=True)
+            dest_full = os.path.join(dest_dir, dest_name)
+            try:
+                os.makedirs(dest_dir, exist_ok=True)
+                if os.path.exists(dest_full):
+                    logger.warning(f"字幕任务 {task['id']} 目标已存在，跳过: {dest_full}")
+                    db.update_file_task_status(ft["id"], "completed")
+                    try:
+                        os.remove(src_full)
+                        logger.info(f"字幕源文件已清理: {src_full}")
+                    except OSError as e:
+                        logger.warning(f"字幕源文件清理失败 {src_full}: {e}")
+                    continue
+                shutil.copy2(src_full, dest_full)
+                db.update_file_task_status(ft["id"], "completed")
+                logger.info(f"字幕已移动: {src_full} -> {dest_full}")
+                try:
+                    os.remove(src_full)
+                    logger.info(f"字幕源文件已清理: {src_full}")
+                except OSError as e:
+                    logger.warning(f"字幕源文件清理失败 {src_full}: {e}")
+            except Exception as e:
+                logger.error(f"字幕任务 {task['id']} 复制失败: {e}")
+                db.update_file_task_status(ft["id"], "failed", str(e))
+                raise
+        db.update_task_status(task["id"], "completed")
+        db.insert_notification(
+            title="字幕任务完成",
+            content=f"字幕「{task.get('taskName', '')}」已移动至目标路径",
+            type=NotificationType.SUCCESS.value,
+        )
 
     def _extract_torrent_hash(self, task_name: str, source_url: str) -> str | None:
         """从任务名或链接中提取种子 Hash，统一为 40 位小写 hex 以便与 qBittorrent API 一致"""

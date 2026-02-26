@@ -34,9 +34,9 @@ const initFromRoute = () => {
 const mediaType = ref<'movie' | 'tv'>('movie')
 // 列表类型：热播(周) | 热播(日) | 热门 | 高分
 const listKind = ref<'trending_week' | 'trending_day' | 'popular' | 'top_rated'>('trending_week')
-// 点击卡片时的搜索来源：海盗湾 | 动漫花园（可从设置页偏好恢复）
+// 点击卡片时的搜索来源：海盗湾 | 动漫花园 | ASSRT字幕站（可从设置页偏好恢复）
 const DEFAULT_SEARCH_SOURCE_KEY = 'zongzi_default_search_source'
-const searchSource = ref<'piratebay' | 'anime'>('piratebay')
+const searchSource = ref<'piratebay' | 'anime' | 'assrt'>('piratebay')
 
 const page = ref(1)
 
@@ -118,8 +118,10 @@ const fetchList = async () => {
   }
 }
 
-// 点击电影卡片：按 searchSource 跳转海盗湾或动漫花园
+// 点击电影卡片：按 searchSource 跳转海盗湾 / 动漫花园 / ASSRT字幕站
 const goMovieSearch = async (it: API.TMDBMovie) => {
+  const tmdbYear = it.release_date?.slice(0, 4) || ''
+  const chineseName = getMovieChineseName(it)
   if (searchSource.value === 'piratebay') {
     let q = ''
     const id = it.id
@@ -133,18 +135,22 @@ const goMovieSearch = async (it: API.TMDBMovie) => {
     }
     if (!q) q = getMovieOriginal(it)
     if (!q) return
-    const tmdbYear = it.release_date?.slice(0, 4) || ''
-    router.push({ path: '/piratebay', query: { q, tmdbName: getMovieChineseName(it), tmdbYear } })
-  } else {
-    const name = getMovieChineseName(it) || getMovieOriginal(it)
+    router.push({ path: '/piratebay', query: { q, tmdbName: chineseName, tmdbYear } })
+  } else if (searchSource.value === 'assrt') {
+    const name = chineseName || getMovieOriginal(it)
     if (!name) return
-    const tmdbYear = it.release_date?.slice(0, 4) || ''
+    router.push({ path: '/subtitle', query: { q: name, tmdbName: chineseName, tmdbYear } })
+  } else {
+    const name = chineseName || getMovieOriginal(it)
+    if (!name) return
     router.push({ path: '/anime', query: { q: name, tmdbName: name, tmdbYear } })
   }
 }
 
-// 点击剧集卡片：按 searchSource 跳转海盗湾或动漫花园
+// 点击剧集卡片：按 searchSource 跳转海盗湾 / 动漫花园 / ASSRT字幕站
 const goTvSearch = async (it: API.TMDBTV) => {
+  const tmdbYear = it.first_air_date?.slice(0, 4) || ''
+  const chineseName = getTvChineseName(it)
   if (searchSource.value === 'piratebay') {
     let q = ''
     const id = it.id
@@ -158,12 +164,14 @@ const goTvSearch = async (it: API.TMDBTV) => {
     }
     if (!q) q = getTvOriginal(it)
     if (!q) return
-    const tmdbYear = it.first_air_date?.slice(0, 4) || ''
-    router.push({ path: '/piratebay', query: { q, tmdbName: getTvChineseName(it), tmdbYear } })
-  } else {
-    const name = getTvChineseName(it) || getTvOriginal(it)
+    router.push({ path: '/piratebay', query: { q, tmdbName: chineseName, tmdbYear } })
+  } else if (searchSource.value === 'assrt') {
+    const name = chineseName || getTvOriginal(it)
     if (!name) return
-    const tmdbYear = it.first_air_date?.slice(0, 4) || ''
+    router.push({ path: '/subtitle', query: { q: name, tmdbName: chineseName, tmdbYear } })
+  } else {
+    const name = chineseName || getTvOriginal(it)
+    if (!name) return
     router.push({ path: '/anime', query: { q: name, tmdbName: name, tmdbYear } })
   }
 }
@@ -199,7 +207,7 @@ watch(() => page.value, () => {
 
 onMounted(() => {
   const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(DEFAULT_SEARCH_SOURCE_KEY) : null
-  if (saved === 'piratebay' || saved === 'anime') searchSource.value = saved
+  if (saved === 'piratebay' || saved === 'anime' || saved === 'assrt') searchSource.value = saved
   initFromRoute()
   syncRoute()
   fetchList()
@@ -270,6 +278,14 @@ onMounted(() => {
             @click="searchSource = 'anime'"
           >
             动漫花园
+          </button>
+          <button
+            type="button"
+            class="px-3 py-2 text-sm font-medium rounded-md transition-colors cursor-pointer"
+            :class="searchSource === 'assrt' ? 'bg-green-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="searchSource = 'assrt'"
+          >
+            ASSRT字幕站
           </button>
         </div>
       </div>

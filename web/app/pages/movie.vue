@@ -10,8 +10,8 @@ import AppPagination from '@/components/AppPagination.vue'
 const route = useRoute()
 const router = useRouter()
 
-// 顶部选择的搜索来源：海盗湾 | 动漫花园
-const searchSource = ref<'piratebay' | 'anime'>('piratebay')
+// 顶部选择的搜索来源：海盗湾 | 动漫花园 | ASSRT字幕站
+const searchSource = ref<'piratebay' | 'anime' | 'assrt'>('piratebay')
 
 const page = ref(Number(route.query.page) || 1)
 const loading = ref(false)
@@ -61,8 +61,10 @@ const getOriginalKeyword = (it: API.TMDBMovie) =>
 const getChineseName = (it: API.TMDBMovie) =>
   (it.title && it.title.trim()) || (it.original_title && it.original_title.trim()) || ''
 
-// 根据顶部选中的来源跳转；海盗湾优先使用 TMDB 英文标题
+// 根据顶部选中的来源跳转；海盗湾优先使用 TMDB 英文标题；ASSRT字幕站用中文名搜索
 const goSearch = async (it: API.TMDBMovie) => {
+  const tmdbYear = it.release_date?.slice(0, 4) || ''
+  const chineseName = getChineseName(it)
   if (searchSource.value === 'piratebay') {
     let q = ''
     const id = it.id
@@ -76,12 +78,14 @@ const goSearch = async (it: API.TMDBMovie) => {
     }
     if (!q) q = getOriginalKeyword(it)
     if (!q) return
-    const tmdbYear = it.release_date?.slice(0, 4) || ''
-    router.push({ path: '/piratebay', query: { q, tmdbName: getChineseName(it), tmdbYear } })
-  } else {
-    const name = (it.title && it.title.trim()) || (it.original_title && it.original_title.trim()) || ''
+    router.push({ path: '/piratebay', query: { q, tmdbName: chineseName, tmdbYear } })
+  } else if (searchSource.value === 'assrt') {
+    const name = chineseName || getOriginalKeyword(it)
     if (!name) return
-    const tmdbYear = it.release_date?.slice(0, 4) || ''
+    router.push({ path: '/subtitle', query: { q: name, tmdbName: chineseName, tmdbYear } })
+  } else {
+    const name = chineseName || getOriginalKeyword(it)
+    if (!name) return
     router.push({ path: '/anime', query: { q: name, tmdbName: name, tmdbYear } })
   }
 }
@@ -109,6 +113,14 @@ const goSearch = async (it: API.TMDBMovie) => {
             @click="searchSource = 'anime'"
           >
             动漫花园
+          </button>
+          <button
+            type="button"
+            class="px-2.5 py-1.5 sm:px-3 text-sm font-medium rounded-md transition-colors cursor-pointer"
+            :class="searchSource === 'assrt' ? 'bg-green-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="searchSource = 'assrt'"
+          >
+            ASSRT字幕站
           </button>
         </div>
       </div>

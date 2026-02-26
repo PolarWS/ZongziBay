@@ -1,5 +1,6 @@
 export const DownloadTaskStatusMap: Record<string, string> = {
   downloading: '下载中',
+  pending_download: '待下载',
   moving: '移动中',
   seeding: '做种中',
   completed: '已完成',

@@ -14,6 +14,7 @@ os.environ["ZONGZI_DATABASE_PATH"] = os.path.abspath(_test_db.name)
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core import db
 from app.main import app
 
 
@@ -29,7 +30,8 @@ def _cleanup_test_db():
 
 @pytest.fixture
 def client(_cleanup_test_db):
-    """FastAPI 测试客户端"""
+    """FastAPI 测试客户端。显式初始化临时库表结构，避免依赖 lifespan 执行顺序。"""
+    db.init_db()
     return TestClient(app)
 
 

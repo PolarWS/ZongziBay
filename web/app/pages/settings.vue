@@ -14,7 +14,7 @@ const DEFAULT_SEARCH_SOURCE_KEY = 'zongzi_default_search_source'
 const DEFAULT_TYPE_KEY = 'zongzi_default_type'
 
 type Theme = 'light' | 'dark' | 'system'
-type SearchSource = 'piratebay' | 'anime'
+type SearchSource = 'piratebay' | 'anime' | 'assrt'
 type DefaultType = 'movie' | 'tv'
 
 // --- 只读数据：路径、模板、Tracker ---
@@ -102,7 +102,7 @@ onMounted(() => {
     applyTheme('system')
   }
   const s = localStorage.getItem(DEFAULT_SEARCH_SOURCE_KEY) as SearchSource | null
-  if (s && (s === 'piratebay' || s === 'anime')) defaultSearchSource.value = s
+  if (s && (s === 'piratebay' || s === 'anime' || s === 'assrt')) defaultSearchSource.value = s
   const d = localStorage.getItem(DEFAULT_TYPE_KEY) as DefaultType | null
   if (d && (d === 'movie' || d === 'tv')) defaultType.value = d
 
@@ -178,6 +178,13 @@ onUnmounted(() => {
               @click="setDefaultSearchSource('anime')"
             >
               动漫花园
+            </Button>
+            <Button
+              :variant="defaultSearchSource === 'assrt' ? 'default' : 'outline'"
+              size="sm"
+              @click="setDefaultSearchSource('assrt')"
+            >
+              ASSRT字幕站
             </Button>
           </div>
         </div>

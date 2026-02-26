@@ -210,6 +210,36 @@ class Database:
             )
         conn.commit()
 
+    def update_file_task_source_path(self, file_task_id: int, source_path: str) -> None:
+        """更新文件任务的源路径（用于字幕后台下载完成后回填文件名）"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE file_task SET sourcePath = ?, updateTime = ? WHERE id = ?",
+            (source_path, now, file_task_id),
+        )
+        conn.commit()
+
+    def update_download_task_name_and_status(
+        self, task_id: int, task_name: str, status: str, task_info: Optional[str] = None
+    ) -> None:
+        """更新下载任务名称、状态，可选更新任务信息（用于字幕后台下载完成后）"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.get_conn()
+        cur = conn.cursor()
+        if task_info is not None:
+            cur.execute(
+                "UPDATE download_task SET taskName = ?, taskInfo = ?, taskStatus = ?, updateTime = ? WHERE id = ?",
+                (task_name, task_info, status, now, task_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE download_task SET taskName = ?, taskStatus = ?, updateTime = ? WHERE id = ?",
+                (task_name, status, now, task_id),
+            )
+        conn.commit()
+
     def update_file_tasks_by_download_task_id(self, download_task_id: int, status: str) -> None:
         """批量更新指定下载任务关联的所有文件任务状态"""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -300,6 +330,8 @@ get_active_tasks = db.get_active_tasks
 update_task_status = db.update_task_status
 get_file_tasks = db.get_file_tasks
 update_file_task_status = db.update_file_task_status
+update_file_task_source_path = db.update_file_task_source_path
+update_download_task_name_and_status = db.update_download_task_name_and_status
 update_file_tasks_by_download_task_id = db.update_file_tasks_by_download_task_id
 
 insert_notification = db.insert_notification

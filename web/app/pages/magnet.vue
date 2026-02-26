@@ -2,6 +2,7 @@
 import { parseMagnetApiV1MagnetParsePost } from '@/api/magnet'
 import { addTaskApiV1TasksAddPost } from '@/api/tasks'
 import { getPathConfigApiV1SystemPathsGet as getSystemPaths, getRenameTemplatesApiV1SystemRenameTemplatesGet } from '@/api/system'
+import { assrtDetail, assrtDownloadBatch } from '@/api/assrt'
 import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
 import AppEmpty from '@/components/AppEmpty.vue'
 import { Button } from '@/components/ui/button'
@@ -35,6 +36,7 @@ import {
   Pencil,
 } from 'lucide-vue-next'
 
+import { toast } from 'vue-sonner'
 import { performSmartRename, getExt, extractYearFromFiles } from '@/utils/renamer'
 import FileTreeView from '@/components/FileTreeView.vue'
 
@@ -49,7 +51,8 @@ const customTargetPath = ref('')
 const viewMode = ref<'list' | 'tree'>('list')
 const loading = ref(false)
 const errMsg = ref<string | null>(null)
-const files = ref<(API.MagnetFile & { newName: string; checked: boolean })[]>([])
+/** 文件行：magnet 解析或 ASSRT 详情；字幕模式下 fileIndex 为 null 表示整包，数字表示 filelist 下标 */
+const files = ref<(API.MagnetFile & { newName: string; checked: boolean; fileIndex?: number | null })[]>([])
 const systemPaths = ref<any>({})
 const renameTemplates = ref<{ movie?: string; tv?: string; anime?: string }>({})
 const renameTemplateDialogOpen = ref(false)
@@ -84,6 +87,13 @@ const commonKeywords = [
 
 // 从路由与类型派生的计算属性
 const magnet = computed(() => (route.query.magnet as string) || '')
+const subtitleId = computed(() => {
+  const v = route.query.subtitleId as string
+  if (!v) return null
+  const n = parseInt(v, 10)
+  return Number.isFinite(n) ? n : null
+})
+const isSubtitleMode = computed(() => subtitleId.value != null && !magnet.value.trim())
 const tmdbName = computed(() => (route.query.tmdbName as string) || '')
 const tmdbYear = computed(() => (route.query.tmdbYear as string) || '')
 const category = computed(() => (route.query.category as string) || '')
@@ -93,17 +103,33 @@ const defaultType = computed(() => {
   if (['205', '208'].includes(category.value)) return 'tv'
   return 'movie'
 })
-const info = computed(() => ({
-  name: (route.query.name as string) || '',
-  size: (route.query.size as string) || '',
-  seeders: (route.query.seeders as string) || '',
-  leechers: (route.query.leechers as string) || '',
-  num_files: (route.query.num_files as string) || '',
-  username: (route.query.username as string) || '',
-  added: (route.query.added as string) || '',
-  category: category.value,
-  imdb: (route.query.imdb as string) || '',
-}))
+const subtitleDetail = ref<API.AssrtSubDetail | null>(null)
+const info = computed(() => {
+  if (isSubtitleMode.value && subtitleDetail.value) {
+    return {
+      name: subtitleDetail.value.native_name || subtitleDetail.value.title || `字幕 #${subtitleId.value}`,
+      size: subtitleDetail.value.size ? String(subtitleDetail.value.size) : '',
+      seeders: '',
+      leechers: '',
+      num_files: (subtitleDetail.value.filelist?.length ?? 0) ? String((subtitleDetail.value.filelist?.length ?? 0) + (subtitleDetail.value.url ? 1 : 0)) : '',
+      username: '',
+      added: subtitleDetail.value.upload_time || '',
+      category: '',
+      imdb: '',
+    }
+  }
+  return {
+    name: (route.query.name as string) || '',
+    size: (route.query.size as string) || '',
+    seeders: (route.query.seeders as string) || '',
+    leechers: (route.query.leechers as string) || '',
+    num_files: (route.query.num_files as string) || '',
+    username: (route.query.username as string) || '',
+    added: (route.query.added as string) || '',
+    category: category.value,
+    imdb: (route.query.imdb as string) || '',
+  }
+})
 const currentPaths = computed(() => {
   const type = selectedType.value
   if (type === 'tv') {
@@ -179,10 +205,19 @@ watch(tmdbYear, (v) => {
   if (v) editableYear.value = v
 }, { immediate: true })
 
-// 挂载时解析磁链并拉取系统路径
+function loadFileList() {
+  if (isSubtitleMode.value) fetchSubtitleFiles()
+  else if (magnet.value.trim()) fetchFiles()
+}
+
+// 路由 query 变化时重新拉取（例如从字幕页跳转到本页会复用组件）
+watch([subtitleId, magnet], () => {
+  loadFileList()
+}, { immediate: false })
+
 onMounted(() => {
-  fetchFiles()
   fetchPaths()
+  loadFileList()
 })
 
 // 格式化文件大小显示
@@ -239,6 +274,55 @@ const fetchFiles = async () => {
         editableYear.value = extractYearFromFiles(files.value)
       }
     }
+  } finally {
+    loading.value = false
+  }
+}
+
+// 字幕模式：用 ASSRT 详情接口拉取文件列表（整包 + filelist），不用 qB 解析
+const fetchSubtitleFiles = async () => {
+  const id = subtitleId.value
+  if (id == null) return
+  loading.value = true
+  errMsg.value = null
+  history.value = []
+  subtitleDetail.value = null
+  try {
+    const res = await assrtDetail({ id })
+    const data = (res as any)?.data ?? null
+    if (!data) {
+      errMsg.value = (res as any)?.message || '获取字幕详情失败'
+      files.value = []
+      return
+    }
+    subtitleDetail.value = data as API.AssrtSubDetail
+    const list: (API.MagnetFile & { newName: string; checked: boolean; fileIndex?: number | null })[] = []
+    const baseName = tmdbName.value || data.native_name || data.title || `字幕${id}`
+    if (data.url) {
+      list.push({
+        name: data.filename || '整包',
+        path: '__package__',
+        size: data.size ?? 0,
+        newName: baseName ? `${baseName}/${(data.filename || 'package')}` : (data.filename || 'package'),
+        checked: false,
+        fileIndex: null,
+      })
+    }
+    const subExts = ['.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx']
+    ;(data.filelist || []).forEach((f: API.AssrtFileListItem, i: number) => {
+      const name = f.f || f.url || ''
+      const ext = getExt(name)
+      const isSub = subExts.includes(ext)
+      list.push({
+        name,
+        path: f.url || '',
+        size: parseInt(String(f.s || 0), 10) || 0,
+        newName: baseName ? `${baseName}/${name}` : name,
+        checked: isSub,
+        fileIndex: i,
+      })
+    })
+    files.value = list
   } finally {
     loading.value = false
   }
@@ -358,10 +442,44 @@ const confirmRenameTemplateDialog = () => {
   renameTemplateDialogOpen.value = false
 }
 
-// 确认添加任务并跳转首页
+// 确认添加任务并跳转首页（字幕模式走 assrtDownload，否则走 qB 任务接口）
 const onConfirm = async () => {
   if (loading.value) return
+  const id = subtitleId.value
   const link = magnet.value.trim()
+  if (isSubtitleMode.value) {
+    if (id == null) return
+    const selectedFiles = files.value.filter(f => f.checked)
+    if (selectedFiles.length === 0) {
+      errMsg.value = '请至少勾选一个文件'
+      return
+    }
+    loading.value = true
+    errMsg.value = null
+    const targetPath = (customTargetPath.value || currentPaths.value.target || '').trim()
+    if (!targetPath) {
+      errMsg.value = '请选择或填写归档路径（任务设置中的目标路径）'
+      return
+    }
+    try {
+      const res = await assrtDownloadBatch({
+        id,
+        target_path: targetPath,
+        items: selectedFiles.map(f => ({
+          file_index: f.fileIndex ?? undefined,
+          file_rename: f.newName || f.name || undefined,
+        })),
+      })
+      const msg = (res as any)?.data?.message
+      if (msg) toast.success(msg)
+      router.push('/')
+    } catch (e: any) {
+      errMsg.value = e?.message || '添加字幕任务失败'
+    } finally {
+      loading.value = false
+    }
+    return
+  }
   if (!link) return
   loading.value = true
   errMsg.value = null
@@ -421,7 +539,8 @@ const onCancel = () => {
               <span class="mt-1">{{ info.name || '未命名资源' }}</span>
            </div>
            <div class="text-xs text-muted-foreground break-all pl-2 sm:pl-4">
-              {{ magnet || '无磁力链接' }}
+              <template v-if="isSubtitleMode">字幕 #{{ subtitleId }}</template>
+              <template v-else>{{ magnet || '无磁力链接' }}</template>
            </div>
         </div>
 
