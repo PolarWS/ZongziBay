@@ -31,3 +31,23 @@ export async function getTrackersApiV1SystemTrackersGet(options?: {
     ...(options || {}),
   });
 }
+
+/** Get Config 获取完整配置（供设置页编辑） GET /api/v1/system/config */
+export async function getConfigApiV1SystemConfigGet(options?: { [key: string]: any }) {
+  return request<API.BaseResponse & { data?: Record<string, any> }>("/api/v1/system/config", {
+    method: "GET",
+    ...(options || {}),
+  });
+}
+
+/** Save Config 保存配置 PUT /api/v1/system/config */
+export async function saveConfigApiV1SystemConfigPut(
+  body: Record<string, any>,
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponse>("/api/v1/system/config", {
+    method: "PUT",
+    data: body,
+    ...(options || {}),
+  });
+}

@@ -53,8 +53,20 @@ class QBittorrentClient:
             if not self.login():
                 raise BusinessException(code=ErrorCode.SYSTEM_ERROR, message="无法登录到 qBittorrent")
 
-    def add_torrent(self, urls: str, is_paused: bool = False, save_path: str = None) -> bool:
-        """添加种子"""
+    def add_torrent(
+        self,
+        urls: str,
+        is_paused: bool = False,
+        save_path: str = None,
+        content_layout: Optional[str] = None,
+    ) -> bool:
+        """添加种子
+
+        content_layout:
+        - "Original": 保持种子原始结构
+        - "NoSubfolder": 不创建种子名子目录（本程序用于避免多余“套壳”）
+        - "Subfolder": 强制创建子目录
+        """
         self.ensure_logged_in()
         url = f"{self.host}/api/v2/torrents/add"
         data = {
@@ -63,6 +75,8 @@ class QBittorrentClient:
         }
         if save_path:
             data['savepath'] = save_path
+        if content_layout:
+            data['contentLayout'] = content_layout
         response = self.session.post(url, data=data, timeout=30)
         return response.status_code == 200
 

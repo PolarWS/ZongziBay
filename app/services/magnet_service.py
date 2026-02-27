@@ -157,6 +157,7 @@ class MagnetService:
 
         magnet_with_trackers = self._append_trackers(magnet_link)
         try:
+            # 解析时不关心目录结构，这里保持默认布局
             success = client.add_torrent(urls=magnet_with_trackers, is_paused=False, save_path=target_path)
             if not success:
                 raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="添加下载任务失败")

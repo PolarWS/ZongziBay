@@ -77,7 +77,6 @@ paths:
   movie_download_path: "/temp"    # 电影下载保存路径
   tv_download_path: "/temp"       # 电视剧下载保存路径
   anime_download_path: "/temp"    # 番剧下载保存路径
-  subtitle_download_path: "/temp" # 字幕下载保存路径
   temp_download_path: "/temp"     # 磁力解析等临时目录
 
   # --- 归档路径配置 (整理刮削后的最终存储位置) ---

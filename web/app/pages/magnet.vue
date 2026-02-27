@@ -457,6 +457,7 @@ const onConfirm = async () => {
     loading.value = true
     errMsg.value = null
     const targetPath = (customTargetPath.value || currentPaths.value.target || '').trim()
+    const downloadPath = (customSourcePath.value || currentPaths.value.download || '').trim()
     if (!targetPath) {
       errMsg.value = '请选择或填写归档路径（任务设置中的目标路径）'
       return
@@ -465,6 +466,7 @@ const onConfirm = async () => {
       const res = await assrtDownloadBatch({
         id,
         target_path: targetPath,
+        download_path: downloadPath || undefined,
         items: selectedFiles.map(f => ({
           file_index: f.fileIndex ?? undefined,
           file_rename: f.newName || f.name || undefined,

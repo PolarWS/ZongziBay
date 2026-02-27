@@ -35,6 +35,7 @@ export async function assrtDownload(params: {
   file_index?: number
   target_path?: string
   file_rename?: string
+  download_path?: string
 }) {
   return request<API.BaseResponseAssrtDownloadResponse_>('/api/v1/subtitle/sub/download', {
     method: 'POST',
@@ -43,6 +44,7 @@ export async function assrtDownload(params: {
       file_index: params.file_index,
       target_path: params.target_path,
       file_rename: params.file_rename,
+      download_path: params.download_path,
     },
   })
 }
@@ -51,6 +53,7 @@ export async function assrtDownload(params: {
 export async function assrtDownloadBatch(body: {
   id: number
   target_path?: string
+  download_path?: string
   items: Array<{ file_index?: number; file_rename?: string }>
 }) {
   return request<API.BaseResponseAssrtDownloadBatchResponse_>('/api/v1/subtitle/sub/download/batch', {

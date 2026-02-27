@@ -39,15 +39,52 @@ def _resolve_download_path(relative_path: str) -> str:
     return os.path.abspath(os.path.expanduser(relative_path))
 
 
-def _get_subtitle_download_dir() -> str:
-    """字幕 HTTP 下载的临时目录（paths.subtitle_download_path），会拼上 download_root_path。"""
-    raw = config.get("paths.subtitle_download_path") or config.get("paths.default_download_path") or "/temp"
-    dir_path = _resolve_download_path(raw)
+def _choose_subtitle_download_relative_by_target(target_path: Optional[str]) -> str:
+    """
+    根据归档目标路径推断字幕临时下载目录的相对路径：
+    - 若目标等于 movie_target_path，则用 movie_download_path
+    - 若目标等于 tv_target_path，则用 tv_download_path
+    - 若目标等于 anime_target_path，则用 anime_download_path
+    - 否则统一用 default_download_path
+    """
+    paths_cfg = config.get("paths", {}) or {}
+    default_rel = paths_cfg.get("default_download_path") or "/temp"
+    target_norm = (target_path or "").strip().replace("\\", "/")
+    if not target_norm:
+        return default_rel
+
+    movie_target = (paths_cfg.get("movie_target_path") or "").replace("\\", "/")
+    tv_target = (paths_cfg.get("tv_target_path") or "").replace("\\", "/")
+    anime_target = (paths_cfg.get("anime_target_path") or "").replace("\\", "/")
+
+    if movie_target and target_norm == movie_target:
+        return paths_cfg.get("movie_download_path") or default_rel
+    if tv_target and target_norm == tv_target:
+        return paths_cfg.get("tv_download_path") or default_rel
+    if anime_target and target_norm == anime_target:
+        return paths_cfg.get("anime_download_path") or default_rel
+    return default_rel
+
+
+def _get_subtitle_download_dir_for_target(target_path: Optional[str]) -> str:
+    """根据目标路径选择字幕临时下载目录，并拼上 download_root_path / root_path。"""
+    rel = _choose_subtitle_download_relative_by_target(target_path)
+    dir_path = _resolve_download_path(rel)
     try:
         os.makedirs(dir_path, exist_ok=True)
     except OSError as e:
         logger.warning("创建字幕下载目录失败 %s: %s", dir_path, e)
     return dir_path
+
+
+def _get_subtitle_download_dir() -> str:
+    """
+    兼容旧逻辑的兜底：不区分类型时的字幕临时下载目录。
+    优先 paths.subtitle_download_path，其次 paths.default_download_path，最后 /temp。
+    """
+    paths_cfg = config.get("paths", {}) or {}
+    raw = paths_cfg.get("subtitle_download_path") or paths_cfg.get("default_download_path") or "/temp"
+    return _resolve_download_path(raw)
 
 # ASSRT 错误码与说明（文档）
 ASSRT_ERROR_MESSAGES = {
@@ -237,9 +274,11 @@ class AssrtService:
         detail: AssrtSubDetail,
         sub_id: int,
         file_index: Optional[int] = None,
+        download_dir: Optional[str] = None,
     ) -> Tuple[str, str]:
-        """HTTP 下载字幕到 paths.subtitle_download_path，返回 (绝对路径, 文件名)。"""
-        download_dir = _get_subtitle_download_dir()
+        """HTTP 下载字幕到临时目录，返回 (绝对路径, 文件名)。"""
+        if not download_dir:
+            download_dir = _get_subtitle_download_dir()
         if file_index is not None and detail.filelist:
             idx = int(file_index)
             if idx < 0 or idx >= len(detail.filelist):
@@ -278,12 +317,19 @@ class AssrtService:
         file_index: Optional[int],
         target_path: Optional[str],
         file_rename: Optional[str],
+        download_path: Optional[str] = None,
     ) -> Tuple[int, str, str, str]:
         """
         使用已拿到的 detail（含下载链接）直接 HTTP 下载并写入任务表，不再请求 ASSRT 详情接口。
         返回 (task_id, task_name, source_path, target_path)。
         """
-        saved_path, filename = self._download_sub_to_path(detail, sub_id, file_index)
+        final_target = (target_path or "").strip().replace("\\", "/")
+        # 优先使用前端传入的下载目录；未传则按目标路径推断（电影/剧集/番剧/默认）
+        if download_path:
+            download_dir = _resolve_download_path(download_path)
+        else:
+            download_dir = _get_subtitle_download_dir_for_target(final_target)
+        saved_path, filename = self._download_sub_to_path(detail, sub_id, file_index, download_dir=download_dir)
         source_dir = os.path.dirname(saved_path)
         task_name = (detail.native_name or f"字幕 {sub_id}").strip()
         if len(task_name) > 200:
@@ -296,7 +342,6 @@ class AssrtService:
         else:
             dest_dir_relative = ""
             dest_filename = os.path.basename(dest_full) or filename
-        final_target = (target_path or "").strip().replace("\\", "/")
         if not final_target:
             final_target = (config.get("paths.default_target_path") or "").replace("\\", "/")
         conn = db.get_conn()
@@ -305,7 +350,7 @@ class AssrtService:
                 taskName=task_name,
                 taskInfo=f"ASSRT字幕 #{sub_id}",
                 sourceUrl=f"subtitle:{sub_id}",
-                sourcePath=source_dir,
+                sourcePath=download_dir,
                 targetPath=final_target,
                 taskStatus="moving",
                 commit=False,
@@ -339,6 +384,7 @@ class AssrtService:
         file_index: Optional[int] = None,
         target_path: Optional[str] = None,
         file_rename: Optional[str] = None,
+        download_path: Optional[str] = None,
     ) -> Tuple[int, str, str, str]:
         """
         字幕为 HTTP 直链，qB 不支持；由本程序下载后写入任务表，由 task_monitor 移动/重命名。
@@ -346,13 +392,14 @@ class AssrtService:
         """
         detail = self.get_sub_detail(sub_id)
         return self._create_subtitle_download_task_with_detail(
-            detail, sub_id, file_index, target_path, file_rename
+            detail, sub_id, file_index, target_path, file_rename, download_path
         )
 
     def create_subtitle_download_task_placeholder(
         self,
         sub_id: int,
         target_path: Optional[str],
+        download_path: Optional[str],
         items: List[Tuple[Optional[int], Optional[str]]],
     ) -> int:
         """
@@ -363,10 +410,14 @@ class AssrtService:
         if not items:
             raise BusinessException(code=ErrorCode.PARAMS_ERROR.code, message="至少选择一个文件")
         task_name = f"字幕 {sub_id}"
-        download_dir = _get_subtitle_download_dir()
         final_target = (target_path or "").strip().replace("\\", "/")
         if not final_target:
             final_target = (config.get("paths.default_target_path") or "").replace("\\", "/")
+        # 优先使用前端传入的下载目录；未传则按目标路径推断
+        if download_path:
+            download_dir = _resolve_download_path(download_path)
+        else:
+            download_dir = _get_subtitle_download_dir_for_target(final_target)
         conn = db.get_conn()
         try:
             task_id = db.insert_download_task(
@@ -419,6 +470,19 @@ class AssrtService:
         task_name = (detail.native_name or f"字幕 {sub_id}").strip()
         if len(task_name) > 200:
             task_name = task_name[:200]
+
+        # 读取任务创建时写入的 sourcePath，作为字幕下载目录，保证与最初推断的类型目录一致
+        conn = db.get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT sourcePath FROM download_task WHERE id = ?", (task_id,))
+        row = cur.fetchone()
+        download_dir = None
+        if row:
+            # sqlite3.Row 支持按下标或列名访问
+            download_dir = row["sourcePath"] if isinstance(row, dict) or hasattr(row, "keys") else row[0]
+        if not download_dir:
+            download_dir = _get_subtitle_download_dir()
+
         file_tasks = db.get_file_tasks(task_id)
         file_tasks.sort(key=lambda ft: ft["id"])
         if len(file_tasks) != len(items):
@@ -427,7 +491,7 @@ class AssrtService:
             if i >= len(file_tasks):
                 break
             try:
-                saved_path, filename = self._download_sub_to_path(detail, sub_id, file_index)
+                saved_path, filename = self._download_sub_to_path(detail, sub_id, file_index, download_dir=download_dir)
                 db.update_file_task_source_path(file_tasks[i]["id"], filename)
             except Exception as e:
                 logger.exception("字幕任务 %s 第 %s 个文件下载失败: %s", task_id, i, e)
@@ -455,10 +519,10 @@ class AssrtService:
         task_name = (detail.native_name or f"字幕 {sub_id}").strip()
         if len(task_name) > 200:
             task_name = task_name[:200]
-        download_dir = _get_subtitle_download_dir()
         final_target = (target_path or "").strip().replace("\\", "/")
         if not final_target:
             final_target = (config.get("paths.default_target_path") or "").replace("\\", "/")
+        download_dir = _get_subtitle_download_dir_for_target(final_target)
         conn = db.get_conn()
         try:
             task_id = db.insert_download_task(
