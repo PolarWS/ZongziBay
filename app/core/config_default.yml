@@ -1,0 +1,76 @@
+# 安全相关配置
+# 用于系统登录认证和 JWT Token 生成
+security:
+  username: admin
+  password: password123
+  secret_key: "CHANGE_THIS_SECRET_KEY"
+  algorithm: "HS256"
+  access_token_expire_minutes: 1440
+
+# TMDB (The Movie Database) 配置
+tmdb:
+  api_key: "YOUR_TMDB_API_KEY"
+  language: "zh-CN"
+
+# qBittorrent 下载器配置
+qbittorrent:
+  host: "http://localhost:8080"
+  username: "admin"
+  password: "admin"
+  file_handling:
+    use_copy: true
+    copy_delete_on_complete: false
+  seeding:
+    limit_ratio: 2.0
+    delete_on_ratio_reached: true
+    delete_files: true
+
+# 海盗湾 (PirateBay) 搜索源配置
+piratebay:
+  url: "https://apibay.org/q.php"
+  params: "q=[q]&cat=200"
+
+# 动漫花园 (Anime Garden) 搜索源配置
+anime_garden:
+  url: "https://animes.garden/api/resources"
+  page_size: 20
+
+# 字幕服务
+subtitle:
+  assrt:
+    token: "YOUR_ASSRT_TOKEN"
+    base_url: "https://api.assrt.net"
+
+# 数据库配置
+database:
+  path: "ZongziBay.db"
+
+# 路径映射配置
+paths:
+  download_root_path: ""
+  target_root_path: ""
+  root_path: ""
+  default_download_path: "/temp"
+  movie_download_path: "/temp"
+  tv_download_path: "/temp"
+  anime_download_path: "/temp"
+  temp_download_path: "/temp"
+  default_target_path: "/nas/movies"
+  movie_target_path: "/nas/movies"
+  tv_target_path: "/nas/tv"
+  anime_target_path: "/nas/anime"
+
+# 智能重命名模板
+smart_rename:
+  movie: "{name} ({year})/{name} ({year}){extra}{sub_suffix}{ext}"
+  tv: "{name}/Season {season}/{name} S{ss}E{ee}{extra}{sub_suffix}{ext}"
+  anime: "{name}/Season {season}/{name} S{ss}E{ee}{extra}{sub_suffix}{ext}"
+
+# BT Trackers 列表（默认模板只给出少量，实际可在 config.yml 中补充）
+trackers:
+  - "udp://tracker.opentrackr.org:1337/announce"
+  - "udp://open.stealth.si:80/announce"
+  - "udp://tracker.torrent.eu.org:451/announce"
+  - "udp://tracker.dler.org:6969/announce"
+  - "udp://open.demonii.com:1337/announce"
+

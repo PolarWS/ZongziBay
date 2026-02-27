@@ -74,6 +74,10 @@ async def download_sub(
     file_index: Optional[int] = Query(None, description="压缩包内文件索引（0-based），不传则下载整包"),
     target_path: Optional[str] = Query(None, description="目标路径（不传则使用 paths.default_target_path）"),
     file_rename: Optional[str] = Query(None, description="保存时的文件名（不传则使用原文件名）"),
+    download_path: Optional[str] = Query(
+        None,
+        description="字幕临时下载目录（相对于 paths.download_root_path / root_path 的路径，如 /downloads）",
+    ),
 ):
     """qB 不支持 HTTP 直链；由本程序 HTTP 下载到 paths.subtitle_download_path，写入任务表，由监控移动/重命名到目标路径。"""
     task_id, task_name, source_path, final_target = await run_in_threadpool(
@@ -82,6 +86,7 @@ async def download_sub(
         file_index,
         target_path,
         file_rename,
+        download_path,
     )
     return BaseResponse.success(
         data=AssrtDownloadResponse(
@@ -111,6 +116,7 @@ async def download_subs_batch(body: AssrtDownloadBatchRequest):
         assrt_service.create_subtitle_download_task_placeholder,
         body.id,
         body.target_path,
+        body.download_path,
         item_tuples,
     )
     loop = asyncio.get_event_loop()

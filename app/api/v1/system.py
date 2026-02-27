@@ -1,11 +1,30 @@
 from typing import Any, Dict, List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body, HTTPException
 
 from app.core.config import config
 from app.schemas.base import BaseResponse
 
 router = APIRouter()
+
+
+@router.get("/config", response_model=BaseResponse, summary="获取完整配置（供设置页编辑）")
+async def get_config():
+    """返回当前配置文件内容（未叠加环境变量），用于设置页展示与修改"""
+    data = config.get_file_config()
+    return BaseResponse.success(data=data)
+
+
+@router.put("/config", response_model=BaseResponse, summary="保存配置")
+async def save_config(body: Dict[str, Any] = Body(..., embed=False)):
+    """将配置写回 config 文件并生效；请求体为完整配置对象（JSON）"""
+    if not body or not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="请求体须为配置对象")
+    try:
+        config.save_file_config(body)
+        return BaseResponse.success(message="配置已保存")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # 仅允许暴露的路径配置键（不含账号密码等敏感项，避免 config 结构变更导致泄露）
 ALLOWED_PATH_KEYS = {

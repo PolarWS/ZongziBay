@@ -146,10 +146,12 @@ class TaskService:
                 # 有文件选择时先暂停添加，等元数据后设置优先级再恢复
                 should_filter_files = bool(request.file_tasks)
                 is_paused = should_filter_files
+                # 为避免只选部分文件时 qB 生成多余“种子名子目录”，统一使用 NoSubfolder
                 success = self.qb_client.add_torrent(
                     urls=download_url,
                     save_path=source_path,
-                    is_paused=is_paused
+                    is_paused=is_paused,
+                    content_layout="NoSubfolder",
                 )
                 if not success:
                     logger.error(f"[TaskService] qBittorrent 添加任务失败: url={request.sourceUrl}")

@@ -90,6 +90,7 @@ class AssrtDownloadBatchRequest(BaseModel):
     """批量下载请求：同一字幕 ID，同一目标路径，多个文件"""
     id: int
     target_path: Optional[str] = None
+    download_path: Optional[str] = None
     items: List[AssrtDownloadBatchItem] = Field(default_factory=list)
 
 
