@@ -28,6 +28,21 @@ logging.basicConfig(
 )
 
 
+# 获取项目根目录 (app/main.py -> app/ -> root)
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_version():
+    try:
+        version_file = os.path.join(root_dir, "VERSION")
+        if os.path.isfile(version_file):
+            with open(version_file, "r", encoding="utf-8") as f:
+                return f.read().strip()
+    except Exception:
+        pass
+    return "1.0.0"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动：初始化数据库并启动任务监控
@@ -40,7 +55,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ZongziBay",
-    version="1.0.0",
+    version=get_version(),
     docs_url="/docs",       # Swagger UI 文档地址
     redoc_url="/redoc",     # ReDoc 文档地址
     lifespan=lifespan
@@ -69,8 +84,6 @@ register_exception_handlers(app)
 app.include_router(api_router, prefix="/api/v1")
 
 # 静态文件服务配置
-# 获取项目根目录 (app/main.py -> app/ -> root)
-root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Nuxt 打包输出目录
 static_dir = os.path.join(root_dir, "web", ".output", "public")
 

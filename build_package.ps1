@@ -1,8 +1,13 @@
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$IMAGE_NAME = "zongzibay:latest"
-$OUTPUT_FILE = "zongzibay_latest.tar"
+if (Test-Path "VERSION") {
+    $VERSION = (Get-Content "VERSION").Trim()
+} else {
+    $VERSION = "latest"
+}
+$IMAGE_NAME = "zongzibay:$VERSION"
+$OUTPUT_FILE = "zongzibay_$VERSION.tar"
 
 # 1. Build the image
 Write-Host "----------------------------------------"
