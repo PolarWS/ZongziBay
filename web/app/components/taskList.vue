@@ -16,6 +16,11 @@ import {
 import AppEmpty from '@/components/AppEmpty.vue'
 import { formatTaskStatus } from '@/utils/status'
 
+const props = withDefaults(
+  defineProps<{ refreshIntervalMs?: number }>(),
+  { refreshIntervalMs: 5000 }
+)
+
 const tasks = ref<API.DownloadTask[]>([])
 const total = ref(0)
 const loading = ref(false)
@@ -25,6 +30,14 @@ const ROW_HEIGHT = 60
 const HEADER_HEIGHT = 41
 const listHeight = computed(() => `${10 * ROW_HEIGHT + HEADER_HEIGHT}px`)
 let timer: number | undefined
+
+function startRefreshTimer() {
+  if (timer) clearInterval(timer)
+  timer = undefined
+  if (props.refreshIntervalMs > 0) {
+    timer = window.setInterval(() => loadTasks({ silent: true }), props.refreshIntervalMs)
+  }
+}
 const open = ref(false)
 const cancelDialogOpen = ref(false)
 const fileTaskDialogOpen = ref(false)
@@ -97,9 +110,10 @@ watch(() => pageSize.value, () => {
   page.value = 1
   loadTasks()
 })
+watch(() => props.refreshIntervalMs, startRefreshTimer, { immediate: false })
 onMounted(() => {
   loadTasks()
-  timer = window.setInterval(() => loadTasks({ silent: true }), 5000)
+  startRefreshTimer()
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
@@ -183,11 +197,11 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
         <table class="w-full caption-bottom text-sm table-fixed min-w-0">
           <thead class="[&_tr]:border-b">
             <tr class="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[26%]">任务名称</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%]">来源</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%]">目标路径</th>
-              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[14%]">状态</th>
-              <th class="h-12 px-4 text-right align-middle font-medium text-muted-foreground w-[12%]">操作</th>
+              <th class="h-12 px-2 sm:px-4 text-left align-middle font-medium text-muted-foreground w-[50%] sm:w-[26%]">任务名称</th>
+              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%] hidden sm:table-cell">来源</th>
+              <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground w-[24%] hidden sm:table-cell">目标路径</th>
+              <th class="h-12 px-2 sm:px-4 text-left align-middle font-medium text-muted-foreground w-[25%] sm:w-[14%]">状态</th>
+              <th class="h-12 px-2 sm:px-4 text-right align-middle font-medium text-muted-foreground w-[25%] sm:w-[12%]">操作</th>
             </tr>
           </thead>
           <tbody class="[&_tr:last-child]:border-0">
@@ -214,26 +228,27 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
               class="border-b transition-colors hover:bg-muted/30 data-[state=selected]:bg-muted cursor-pointer group"
               @click="onOpenDetails(item)"
             >
-              <td class="p-4 align-middle font-medium text-foreground min-w-0">
+              <td class="p-2 sm:p-4 align-middle font-medium text-foreground min-w-0">
                 <div class="truncate" :title="item.taskName">{{ item.taskName }}</div>
               </td>
-              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0">
+              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0 hidden sm:table-cell">
                 <div class="truncate" :title="item.sourceUrl || item.sourcePath">
                   {{ item.sourceUrl || item.sourcePath }}
                 </div>
               </td>
-              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0">
+              <td class="p-4 align-middle text-muted-foreground font-mono text-xs min-w-0 hidden sm:table-cell">
                 <div class="truncate" :title="item.targetPath">
                   {{ item.targetPath }}
                 </div>
               </td>
-              <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0">
+              <td class="p-2 sm:p-4 align-middle [&:has([role=checkbox])]:pr-0">
                  <div class="flex items-center gap-2">
                     <span class="relative flex h-2 w-2">
-                      <span v-if="['downloading', 'moving'].includes(item.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
+                      <span v-if="['downloading', 'pending_download', 'moving', 'seeding'].includes(item.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': item.taskStatus === 'seeding' }"></span>
                       <span class="relative inline-flex rounded-full h-2 w-2" 
                         :class="{
-                          'bg-blue-500': ['downloading', 'moving'].includes(item.taskStatus || ''),
+                          'bg-blue-500': ['downloading', 'pending_download', 'moving'].includes(item.taskStatus || ''),
+                          'bg-purple-500': item.taskStatus === 'seeding',
                           'bg-green-500': item.taskStatus === 'completed',
                           'bg-red-500': ['cancelled', 'error'].includes(item.taskStatus || ''),
                           'bg-yellow-500': item.taskStatus === 'pending'
@@ -243,10 +258,10 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                     <span class="text-xs font-medium capitalize">{{ formatTaskStatus(item.taskStatus) }}</span>
                  </div>
               </td>
-              <td class="p-4 align-middle [&:has([role=checkbox])]:pr-0 text-right">
+              <td class="p-2 sm:p-4 align-middle [&:has([role=checkbox])]:pr-0 text-right">
                 <div class="flex items-center justify-end h-8">
                   <Button 
-                     v-if="['downloading', 'pending'].includes(item.taskStatus || '')"
+                     v-if="['downloading', 'pending_download', 'pending', 'seeding'].includes(item.taskStatus || '')"
                      variant="ghost" 
                      size="sm" 
                      class="h-8 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2"
@@ -276,15 +291,15 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
     />
 
     <Dialog v-model:open="open">
-      <DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto w-[90vw] sm:w-full rounded-xl">
+      <DialogContent class="max-h-[85vh] overflow-y-auto overflow-x-auto w-[calc(100vw-1rem)] sm:w-full max-w-[min(56rem,100vw)] rounded-xl min-w-0">
         <DialogHeader>
           <DialogTitle class="text-lg font-semibold tracking-tight">{{ selected?.taskName || '任务详情' }}</DialogTitle>
           <DialogDescription>
             任务 ID: {{ selected?.id }}
           </DialogDescription>
         </DialogHeader>
-        <div class="mt-4 grid gap-4 text-sm">
-           <div class="grid grid-cols-1 sm:grid-cols-[100px_1fr] items-start gap-2 sm:gap-4 p-4 rounded-lg bg-muted/30 border border-border/50">
+        <div class="mt-4 grid gap-4 text-sm min-w-0 overflow-x-auto">
+           <div class="grid grid-cols-1 sm:grid-cols-[100px_minmax(0,1fr)] items-start gap-2 sm:gap-4 p-4 rounded-lg bg-muted/30 border border-border/50 min-w-0">
              <div class="contents sm:hidden">
                <!-- Mobile Layout -->
                <div class="col-span-1 flex flex-col gap-4">
@@ -301,10 +316,11 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                      </span>
                      <span class="font-mono text-sm pl-5 flex items-center gap-2">
                         <span class="relative flex h-2.5 w-2.5">
-                          <span v-if="['downloading', 'moving'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
+                          <span v-if="['downloading', 'pending_download', 'moving', 'seeding'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': selected?.taskStatus === 'seeding' }"></span>
                           <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
                             :class="{
-                              'bg-blue-500': ['downloading', 'moving'].includes(selected?.taskStatus || ''),
+                              'bg-blue-500': ['downloading', 'pending_download', 'moving'].includes(selected?.taskStatus || ''),
+                              'bg-purple-500': selected?.taskStatus === 'seeding',
                               'bg-green-500': selected?.taskStatus === 'completed',
                               'bg-red-500': ['cancelled', 'error'].includes(selected?.taskStatus || ''),
                               'bg-yellow-500': selected?.taskStatus === 'pending'
@@ -326,14 +342,14 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                      <span class="text-muted-foreground font-medium text-xs flex items-center gap-2">
                        <FolderOpen class="w-3 h-3" /> 目标路径
                      </span>
-                     <span class="font-mono text-sm pl-5 break-all">{{ selected?.targetPath }}</span>
+                     <span class="font-mono text-sm pl-5 break-all min-w-0 overflow-x-auto">{{ selected?.targetPath }}</span>
                   </div>
 
                   <div class="flex flex-col gap-1">
                      <span class="text-muted-foreground font-medium text-xs flex items-center gap-2">
                        <Download class="w-3 h-3" /> 来源
                      </span>
-                     <span class="font-mono text-xs pl-5 break-all text-muted-foreground">{{ selected?.sourceUrl || selected?.sourcePath }}</span>
+                     <span class="font-mono text-xs pl-5 break-all text-muted-foreground min-w-0 overflow-x-auto">{{ selected?.sourceUrl || selected?.sourcePath }}</span>
                   </div>
                </div>
              </div>
@@ -353,22 +369,21 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                <span class="text-muted-foreground font-medium flex items-center gap-2">
                  <FolderOpen class="w-4 h-4" /> 目标路径
                </span>
-               <span class="font-mono break-all">{{ selected?.targetPath }}</span>
+               <span class="font-mono break-all min-w-0 overflow-x-auto">{{ selected?.targetPath }}</span>
                
-               <span class="text-muted-foreground font-medium flex items-center gap-2">
-                 <Download class="w-4 h-4" /> 来源
-               </span>
-               <span class="font-mono break-all text-xs">{{ selected?.sourceUrl || selected?.sourcePath }}</span>
+               <span class="text-muted-foreground font-medium flex items-center gap-2 shrink-0">来源</span>
+               <span class="font-mono break-all text-xs min-w-0 overflow-x-auto">{{ selected?.sourceUrl || selected?.sourcePath }}</span>
 
                <span class="text-muted-foreground font-medium flex items-center gap-2">
                  <Activity class="w-4 h-4" /> 状态
                </span>
                <span class="font-mono flex items-center gap-2">
                   <span class="relative flex h-2.5 w-2.5">
-                    <span v-if="['downloading', 'moving'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
+                    <span v-if="['downloading', 'pending_download', 'moving', 'seeding'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': selected?.taskStatus === 'seeding' }"></span>
                     <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
                       :class="{
-                        'bg-blue-500': ['downloading', 'moving'].includes(selected?.taskStatus || ''),
+                        'bg-blue-500': ['downloading', 'pending_download', 'moving'].includes(selected?.taskStatus || ''),
+                        'bg-purple-500': selected?.taskStatus === 'seeding',
                         'bg-green-500': selected?.taskStatus === 'completed',
                         'bg-red-500': ['cancelled', 'error'].includes(selected?.taskStatus || ''),
                         'bg-yellow-500': selected?.taskStatus === 'pending'
@@ -423,8 +438,8 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
            
            <div class="space-y-2">
               <h4 class="font-medium text-foreground">任务信息</h4>
-              <div class="rounded-md bg-zinc-950 p-4 overflow-x-auto">
-                <pre class="text-xs text-zinc-300 font-mono whitespace-pre-wrap">{{ selected?.taskInfo || '无额外信息' }}</pre>
+              <div class="rounded-md bg-neutral-900 dark:bg-muted/80 p-4 min-w-0 overflow-x-auto max-w-full">
+                <pre class="text-xs text-neutral-100 dark:text-foreground font-mono whitespace-pre-wrap break-words">{{ selected?.taskInfo || '无额外信息' }}</pre>
               </div>
            </div>
         </div>
@@ -433,7 +448,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
     
     <!-- File Task Details Dialog -->
      <Dialog v-model:open="fileTaskDialogOpen">
-       <DialogContent class="max-w-2xl max-h-[85vh] overflow-y-auto w-[90vw] sm:w-full rounded-xl">
+       <DialogContent class="max-h-[85vh] overflow-y-auto overflow-x-auto w-[calc(100vw-1rem)] sm:w-full max-w-[min(56rem,100vw)] rounded-xl min-w-0">
          <DialogHeader>
            <DialogTitle class="text-lg font-semibold tracking-tight">文件任务详情</DialogTitle>
            <DialogDescription>
@@ -441,26 +456,26 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
            </DialogDescription>
          </DialogHeader>
          
-         <div class="mt-4 grid gap-4 text-sm">
-           <div class="grid grid-cols-[100px_1fr] items-start gap-y-4 gap-x-4 p-4 rounded-lg bg-muted/30 border border-border/50">
+         <div class="mt-4 grid gap-4 text-sm min-w-0 overflow-x-auto">
+           <div class="grid grid-cols-1 sm:grid-cols-[100px_minmax(0,1fr)] items-start gap-y-4 gap-x-4 p-4 rounded-lg bg-muted/30 border border-border/50 min-w-0">
              
              <!-- Source File -->
              <span class="text-muted-foreground font-medium flex items-center gap-2">
                <FileText class="w-4 h-4" /> 源文件
              </span>
-             <span class="break-all font-mono text-xs">{{ selectedFileTask?.sourcePath }}</span>
+             <span class="break-all font-mono text-xs min-w-0 overflow-x-auto">{{ selectedFileTask?.sourcePath }}</span>
 
              <!-- Rename -->
-             <span class="text-muted-foreground font-medium flex items-center gap-2">
+             <span class="text-muted-foreground font-medium flex items-center gap-2 shrink-0">
                <ArrowRight class="w-4 h-4" /> 重命名
              </span>
-             <span class="break-all font-mono text-xs">{{ selectedFileTask?.file_rename }}</span>
+             <span class="break-all font-mono text-xs min-w-0 overflow-x-auto">{{ selectedFileTask?.file_rename }}</span>
 
              <!-- Target Path -->
-             <span class="text-muted-foreground font-medium flex items-center gap-2">
+             <span class="text-muted-foreground font-medium flex items-center gap-2 shrink-0">
                <FolderOpen class="w-4 h-4" /> 目标路径
              </span>
-             <span class="break-all font-mono text-xs">{{ selectedFileTask?.targetPath || '-' }}</span>
+             <span class="break-all font-mono text-xs min-w-0 overflow-x-auto">{{ selectedFileTask?.targetPath || '-' }}</span>
 
              <!-- Status -->
              <span class="text-muted-foreground font-medium flex items-center gap-2">
@@ -490,7 +505,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                 <span class="text-destructive font-medium flex items-center gap-2">
                   <AlertCircle class="w-4 h-4" /> 错误信息
                 </span>
-                <span class="text-destructive font-mono text-xs break-all">{{ selectedFileTask?.errorMessage }}</span>
+                <span class="text-destructive font-mono text-xs break-all min-w-0 overflow-x-auto">{{ selectedFileTask?.errorMessage }}</span>
              </template>
            </div>
         </div>
@@ -499,7 +514,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
 
     <!-- Cancel Confirmation -->
     <Dialog v-model:open="cancelDialogOpen">
-      <DialogContent class="max-w-sm">
+      <DialogContent class="max-w-sm overflow-x-hidden w-[calc(100vw-1rem)] sm:w-full">
         <DialogHeader>
           <DialogTitle>取消任务</DialogTitle>
           <DialogDescription>

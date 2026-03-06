@@ -1,6 +1,7 @@
 import logging
 import os
 import sqlite3
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -9,10 +10,12 @@ from app.schemas.notification import NotificationType
 
 logger = logging.getLogger(__name__)
 
+
 class Database:
     """
     数据库管理类 (SQLite)
-    负责数据库连接、初始化以及所有的数据 CRUD 操作
+    负责数据库连接、初始化以及所有的数据 CRUD 操作。
+    使用线程本地连接，避免多请求共用同一连接导致的串行等待，API 之间互不阻塞。
     """
 
     def __init__(self):
@@ -22,15 +25,15 @@ class Database:
         self.db_path = path_cfg if os.path.isabs(path_cfg) else os.path.join(root_dir, path_cfg)
         self.schema_path = os.path.join(root_dir, "sql", "main.sql")
         if not os.path.exists(self.schema_path):
-             self.schema_path = os.path.join(root_dir, "sql", "create_table.sql")
-        self.conn = None
+            self.schema_path = os.path.join(root_dir, "sql", "create_table.sql")
+        self._local = threading.local()
 
     def get_conn(self) -> sqlite3.Connection:
-        """获取数据库连接"""
-        if self.conn is None:
-            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self.conn.row_factory = sqlite3.Row
-        return self.conn
+        """获取当前线程的数据库连接（每线程一个，避免多请求互相阻塞）"""
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            self._local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._local.conn.row_factory = sqlite3.Row
+        return self._local.conn
 
     def init_db(self) -> None:
         """
@@ -207,6 +210,36 @@ class Database:
             )
         conn.commit()
 
+    def update_file_task_source_path(self, file_task_id: int, source_path: str) -> None:
+        """更新文件任务的源路径（用于字幕后台下载完成后回填文件名）"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE file_task SET sourcePath = ?, updateTime = ? WHERE id = ?",
+            (source_path, now, file_task_id),
+        )
+        conn.commit()
+
+    def update_download_task_name_and_status(
+        self, task_id: int, task_name: str, status: str, task_info: Optional[str] = None
+    ) -> None:
+        """更新下载任务名称、状态，可选更新任务信息（用于字幕后台下载完成后）"""
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.get_conn()
+        cur = conn.cursor()
+        if task_info is not None:
+            cur.execute(
+                "UPDATE download_task SET taskName = ?, taskInfo = ?, taskStatus = ?, updateTime = ? WHERE id = ?",
+                (task_name, task_info, status, now, task_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE download_task SET taskName = ?, taskStatus = ?, updateTime = ? WHERE id = ?",
+                (task_name, status, now, task_id),
+            )
+        conn.commit()
+
     def update_file_tasks_by_download_task_id(self, download_task_id: int, status: str) -> None:
         """批量更新指定下载任务关联的所有文件任务状态"""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -297,6 +330,8 @@ get_active_tasks = db.get_active_tasks
 update_task_status = db.update_task_status
 get_file_tasks = db.get_file_tasks
 update_file_task_status = db.update_file_task_status
+update_file_task_source_path = db.update_file_task_source_path
+update_download_task_name_and_status = db.update_download_task_name_and_status
 update_file_tasks_by_download_task_id = db.update_file_tasks_by_download_task_id
 
 insert_notification = db.insert_notification

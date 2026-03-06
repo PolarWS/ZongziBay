@@ -1,6 +1,7 @@
 from typing import Any, List
 
 from fastapi import APIRouter, Query
+from fastapi.concurrency import run_in_threadpool
 
 from app.schemas.base import BaseResponse
 from app.schemas.tmdb import (
@@ -22,7 +23,7 @@ async def search_movie(
     page: int = Query(1, description="页码"),
 ):
     """根据关键词搜索电影"""
-    results, total = tmdb_service.search_movies_with_total(query, page)
+    results, total = await run_in_threadpool(tmdb_service.search_movies_with_total, query, page)
     items = [_convert_result(r) for r in results]
     return BaseResponse.success(data=TMDBMovieListResponse(total=total, items=items))
 
@@ -33,7 +34,61 @@ async def search_tv(
     page: int = Query(1, description="页码"),
 ):
     """根据关键词搜索电视剧或番剧"""
-    results, total = tmdb_service.search_tv_shows_with_total(query, page)
+    results, total = await run_in_threadpool(tmdb_service.search_tv_shows_with_total, query, page)
+    items = [_convert_result(r) for r in results]
+    return BaseResponse.success(data=TMDBTVListResponse(total=total, items=items))
+
+
+@router.get("/trending/movie", response_model=BaseResponse[TMDBMovieListResponse], summary="热播电影")
+async def get_trending_movies(
+    page: int = Query(1, description="页码"),
+    window: str = Query("week", description="day | week"),
+):
+    """TMDB 热播电影，按日或周趋势"""
+    results, total = await run_in_threadpool(tmdb_service.get_trending_movies, page, window)
+    items = [_convert_result(r) for r in results]
+    return BaseResponse.success(data=TMDBMovieListResponse(total=total, items=items))
+
+
+@router.get("/trending/tv", response_model=BaseResponse[TMDBTVListResponse], summary="热播剧集")
+async def get_trending_tv(
+    page: int = Query(1, description="页码"),
+    window: str = Query("week", description="day | week"),
+):
+    """TMDB 热播剧集，按日或周趋势"""
+    results, total = await run_in_threadpool(tmdb_service.get_trending_tv, page, window)
+    items = [_convert_result(r) for r in results]
+    return BaseResponse.success(data=TMDBTVListResponse(total=total, items=items))
+
+
+@router.get("/popular/movie", response_model=BaseResponse[TMDBMovieListResponse], summary="热门电影")
+async def get_popular_movies(page: int = Query(1, description="页码")):
+    """TMDB 热门电影列表"""
+    results, total = await run_in_threadpool(tmdb_service.get_popular_movies, page)
+    items = [_convert_result(r) for r in results]
+    return BaseResponse.success(data=TMDBMovieListResponse(total=total, items=items))
+
+
+@router.get("/popular/tv", response_model=BaseResponse[TMDBTVListResponse], summary="热门剧集")
+async def get_popular_tv(page: int = Query(1, description="页码")):
+    """TMDB 热门剧集列表"""
+    results, total = await run_in_threadpool(tmdb_service.get_popular_tv, page)
+    items = [_convert_result(r) for r in results]
+    return BaseResponse.success(data=TMDBTVListResponse(total=total, items=items))
+
+
+@router.get("/list/top_rated/movie", response_model=BaseResponse[TMDBMovieListResponse], summary="高分电影")
+async def get_top_rated_movies(page: int = Query(1, description="页码")):
+    """TMDB 高分电影列表"""
+    results, total = await run_in_threadpool(tmdb_service.get_top_rated_movies, page)
+    items = [_convert_result(r) for r in results]
+    return BaseResponse.success(data=TMDBMovieListResponse(total=total, items=items))
+
+
+@router.get("/list/top_rated/tv", response_model=BaseResponse[TMDBTVListResponse], summary="高分剧集")
+async def get_top_rated_tv(page: int = Query(1, description="页码")):
+    """TMDB 高分剧集列表"""
+    results, total = await run_in_threadpool(tmdb_service.get_top_rated_tv, page)
     items = [_convert_result(r) for r in results]
     return BaseResponse.success(data=TMDBTVListResponse(total=total, items=items))
 
@@ -45,21 +100,21 @@ async def get_suggestions(
     type: str = Query("", description="媒体类型: movie / tv，为空则混合搜索"),
 ):
     """根据输入返回搜索建议（标题补全）"""
-    suggestions = tmdb_service.get_search_suggestions(query, limit, media_type=type)
+    suggestions = await run_in_threadpool(tmdb_service.get_search_suggestions, query, limit, media_type=type)
     return BaseResponse.success(data={"suggestions": suggestions})
 
 
 @router.get("/movie/{movie_id}", response_model=BaseResponse[TMDBMovie], summary="获取电影详情")
 async def get_movie_detail(movie_id: int):
     """获取指定电影的详细信息"""
-    result = tmdb_service.get_movie_details(movie_id)
+    result = await run_in_threadpool(tmdb_service.get_movie_details, movie_id)
     return BaseResponse.success(data=_convert_result(result))
 
 
 @router.get("/tv/{tv_id}", response_model=BaseResponse[TMDBTV], summary="获取电视剧详情")
 async def get_tv_detail(tv_id: int):
     """获取指定电视剧的详细信息"""
-    result = tmdb_service.get_tv_details(tv_id)
+    result = await run_in_threadpool(tmdb_service.get_tv_details, tv_id)
     return BaseResponse.success(data=_convert_result(result))
 
 
@@ -70,7 +125,7 @@ async def get_tv_detail(tv_id: int):
 )
 async def get_movie_english_title(movie_id: int):
     """获取电影的英文标题，供海盗湾等英文搜索使用。无则返回 null。"""
-    title = tmdb_service.get_movie_english_title(movie_id)
+    title = await run_in_threadpool(tmdb_service.get_movie_english_title, movie_id)
     return BaseResponse.success(data=TMDBEnglishTitleResponse(english_title=title))
 
 
@@ -81,7 +136,7 @@ async def get_movie_english_title(movie_id: int):
 )
 async def get_tv_english_title(tv_id: int):
     """获取剧集的英文标题，供海盗湾等英文搜索使用。无则返回 null。"""
-    title = tmdb_service.get_tv_english_title(tv_id)
+    title = await run_in_threadpool(tmdb_service.get_tv_english_title, tv_id)
     return BaseResponse.success(data=TMDBEnglishTitleResponse(english_title=title))
 
 

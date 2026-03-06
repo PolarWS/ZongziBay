@@ -1,13 +1,42 @@
 <script setup lang="ts">
-import Search from '@/components/Search.vue'
+import Search from '~/components/Search.vue'
 import { Button } from '@/components/ui/button'
-import { Activity, ExternalLink } from 'lucide-vue-next'
+import { Activity, ExternalLink, Film, Sparkles, Tv } from 'lucide-vue-next'
 
-// 首页搜索类型：电影 / 剧集，用于搜索框与跳转
+// 首页搜索类型：电影 / 剧集，用于搜索框与跳转（可从设置页偏好恢复）
+const DEFAULT_TYPE_KEY = 'zongzi_default_type'
 const type = ref<'movie' | 'tv'>('tv')
 const onChangeType = (v: 'movie' | 'tv') => {
   type.value = v
 }
+
+// 任务列表刷新间隔（秒），0 表示不自动刷新；持久化到 localStorage
+const REFRESH_INTERVAL_KEY = 'zongzi_task_refresh_interval'
+const refreshIntervalOptions = [
+  { label: '5 秒', value: 5 },
+  { label: '10 秒', value: 10 },
+  { label: '30 秒', value: 30 },
+  { label: '1 分钟', value: 60 },
+  { label: '不自动刷新', value: 0 },
+] as const
+const refreshIntervalSeconds = ref(5)
+const refreshIntervalMs = computed(() =>
+  refreshIntervalSeconds.value > 0 ? refreshIntervalSeconds.value * 1000 : 0
+)
+const onRefreshIntervalChange = (v: number) => {
+  refreshIntervalSeconds.value = v
+  if (typeof localStorage !== 'undefined') localStorage.setItem(REFRESH_INTERVAL_KEY, String(v))
+}
+
+onMounted(() => {
+  const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(DEFAULT_TYPE_KEY) : null
+  if (saved === 'movie' || saved === 'tv') type.value = saved
+  const intervalSaved = typeof localStorage !== 'undefined' ? localStorage.getItem(REFRESH_INTERVAL_KEY) : null
+  if (intervalSaved !== null) {
+    const n = Number(intervalSaved)
+    if (Number.isFinite(n) && n >= 0) refreshIntervalSeconds.value = n
+  }
+})
 </script>
 
 <template>
@@ -30,19 +59,32 @@ const onChangeType = (v: 'movie' | 'tv') => {
                         size="lg" 
                         :variant="type === 'movie' ? 'default' : 'outline'"
                         @click="onChangeType('movie')"
-                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300"
+                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 inline-flex items-center gap-2"
                         :class="type === 'movie' ? 'hover:brightness-110 hover:shadow-lg hover:scale-105' : 'hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105'"
                     >
+                        <Film class="h-4 w-4" />
                         电影
                     </Button>
                     <Button 
                         size="lg" 
                         :variant="type === 'tv' ? 'default' : 'outline'"
                         @click="onChangeType('tv')"
-                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300"
+                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 inline-flex items-center gap-2"
                         :class="type === 'tv' ? 'hover:brightness-110 hover:shadow-lg hover:scale-105' : 'hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105'"
                     >
+                        <Tv class="h-4 w-4" />
                         剧集
+                    </Button>
+                    <Button 
+                        size="lg" 
+                        variant="outline"
+                        as-child
+                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105"
+                    >
+                        <NuxtLink to="/recommend" class="inline-flex items-center gap-2">
+                            <Sparkles class="h-4 w-4" />
+                            推荐
+                        </NuxtLink>
                     </Button>
                 </div>
 
@@ -63,11 +105,28 @@ const onChangeType = (v: 'movie' | 'tv') => {
                          <div class="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
                              <Activity class="w-6 h-6" />
                          </div>
-                         <h2 class="text-2xl font-bold tracking-tight">热门任务</h2>
+                         <h2 class="text-2xl font-bold tracking-tight">任务列表</h2>
                      </div>
                      <p class="text-muted-foreground leading-relaxed">
                          监控并管理您的活跃下载任务。实时获取状态更新及媒体代理的资源分配情况。
                      </p>
+                     <div class="space-y-2 pt-2">
+                        <div class="text-xs font-mono text-muted-foreground uppercase tracking-wider">刷新间隔</div>
+                        <div class="flex flex-wrap gap-2">
+                           <button
+                             v-for="opt in refreshIntervalOptions"
+                             :key="opt.value"
+                             type="button"
+                             class="rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
+                             :class="refreshIntervalSeconds === opt.value
+                               ? 'border-primary bg-primary text-primary-foreground'
+                               : 'border-border bg-background hover:bg-accent hover:text-accent-foreground'"
+                             @click="onRefreshIntervalChange(opt.value)"
+                           >
+                             {{ opt.label }}
+                           </button>
+                        </div>
+                     </div>
                      <div class="pt-4 border-t border-border/40">
                         <div class="text-xs font-mono text-muted-foreground mb-2 uppercase tracking-wider">GitHub 项目地址</div>
                         <a href="https://github.com/PolarWS" target="_blank" class="text-sm font-medium hover:underline flex items-center gap-1 text-primary">
@@ -78,7 +137,7 @@ const onChangeType = (v: 'movie' | 'tv') => {
                  
                  <!-- 右侧内容：min-w-0 让 grid 子项可收缩，避免表格撑出横向滚动 -->
                  <div class="w-full min-w-0">
-                     <TaskList />
+                     <TaskList :refresh-interval-ms="refreshIntervalMs" />
                  </div>
             </div>
         </div>

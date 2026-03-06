@@ -117,6 +117,81 @@ declare namespace API {
     data?: any | null;
   };
 
+  /** 射手网(伪) 字幕列表项 */
+  type AssrtSubItem = {
+    id: number;
+    native_name?: string | null;
+    revision?: number;
+    subtype?: string | null;
+    upload_time?: string | null;
+    vote_score?: number;
+    release_site?: string | null;
+    videoname?: string | null;
+    lang?: { langlist?: Record<string, boolean>; desc?: string } | null;
+  };
+
+  /** 射手网(伪) 详情内单个文件 */
+  type AssrtFileListItem = {
+    url?: string | null;
+    f?: string | null;
+    s?: string | null;
+  };
+
+  /** 射手网(伪) 字幕详情 */
+  type AssrtSubDetail = AssrtSubItem & {
+    filename?: string | null;
+    size?: number | null;
+    url?: string | null;
+    view_count?: number | null;
+    down_count?: number | null;
+    title?: string | null;
+    filelist?: AssrtFileListItem[] | null;
+    producer?: { uploader?: string; verifier?: string; producer?: string; source?: string } | null;
+  };
+
+  /** 射手网(伪) 搜索响应 */
+  type AssrtSearchResponse = {
+    items: AssrtSubItem[];
+    total: number;
+    keyword?: string | null;
+  };
+
+  type BaseResponseAssrtSearchResponse_ = {
+    code?: number;
+    message?: string;
+    data?: AssrtSearchResponse | null;
+  };
+
+  type BaseResponseAssrtSubDetail_ = {
+    code?: number;
+    message?: string;
+    data?: AssrtSubDetail | null;
+  };
+
+  type AssrtDownloadResponse = {
+    task_id: number;
+    task_name: string;
+    source_path: string;
+    target_path: string;
+  };
+
+  type BaseResponseAssrtDownloadResponse_ = {
+    code?: number;
+    message?: string;
+    data?: AssrtDownloadResponse | null;
+  };
+
+  type AssrtDownloadBatchResponse = {
+    results: AssrtDownloadResponse[];
+    message?: string | null;
+  };
+
+  type BaseResponseAssrtDownloadBatchResponse_ = {
+    code?: number;
+    message?: string;
+    data?: AssrtDownloadBatchResponse | null;
+  };
+
   type BaseResponseAnimeGardenSearchResult_ = {
     /** Code */
     code?: number;
@@ -299,7 +374,9 @@ declare namespace API {
 
   type DownloadTaskStatus =
     | "downloading"
+    | "pending_download"
     | "moving"
+    | "seeding"
     | "completed"
     | "cancelled"
     | "error";

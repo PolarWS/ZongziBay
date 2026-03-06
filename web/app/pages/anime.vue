@@ -184,7 +184,7 @@ function openLink(href: string) {
   if (href) window.open(href, '_blank')
 }
 
-// 跳转磁链任务页并携带 TMDB 信息
+// 跳转磁链任务页并携带 TMDB 信息（体积用 KB 转成可读字符串传给 magnet 页）
 function openMagnetPage(it: API.AnimeGardenResource) {
   if (!it.magnet) return
   router.push({
@@ -192,7 +192,7 @@ function openMagnetPage(it: API.AnimeGardenResource) {
     query: {
       magnet: it.magnet,
       name: it.title,
-      size: String(it.size),
+      size: formatSize(it.size),
       tmdbName: tmdbName.value,
       tmdbYear: tmdbYear.value,
       source: 'anime',

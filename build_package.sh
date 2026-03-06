@@ -2,8 +2,9 @@
 set -e
 
 # Configuration
-IMAGE_NAME="zongzibay:latest"
-OUTPUT_FILE="zongzibay_latest.tar"
+VERSION=$(cat VERSION 2>/dev/null || echo "latest")
+IMAGE_NAME="zongzibay:$VERSION"
+OUTPUT_FILE="zongzibay_$VERSION.tar"
 
 # 1. Build the image
 echo "----------------------------------------"

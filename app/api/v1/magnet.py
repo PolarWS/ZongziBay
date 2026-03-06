@@ -11,7 +11,7 @@ router = APIRouter()
 
 @router.post("/parse", response_model=BaseResponse[MagnetParseResponse], summary="解析 Magnet 链接")
 async def parse_magnet(request: MagnetRequest):
-    """通过 Magnet 链接获取文件列表（在线程池执行，不阻塞其他 API）"""
+    """通过 Magnet 链接获取文件列表"""
     try:
         files = await asyncio.to_thread(magnet_service.parse_magnet, request.magnet_link)
         return BaseResponse.success(data={"files": files})
@@ -36,7 +36,7 @@ async def check_connection():
 
 @router.post("/download", response_model=BaseResponse[dict], summary="推送 Magnet 链接到 qBittorrent 下载")
 async def download_magnet(request: MagnetDownloadRequest):
-    """推送 Magnet 链接到 qBittorrent 下载（在线程池执行，不阻塞其他 API）"""
+    """推送 Magnet 链接到 qBittorrent 下载"""
     try:
         result = await asyncio.to_thread(
             magnet_service.add_magnet_download,

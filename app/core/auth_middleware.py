@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from typing import Optional
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -20,6 +22,18 @@ AUTH_WHITELIST = [
     "/api/v1/users/login",    # 登录接口
     "/api/v1/health",          # 健康检查
 ]
+
+
+def _verify_token_sync(token: str) -> Optional[str]:
+    """同步校验 JWT，在线程池中调用以避免阻塞事件循环。返回 username 或 None。"""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        if not username or username != config.get("security.username"):
+            return None
+        return username
+    except JWTError:
+        return None
 
 
 class JWTAuthMiddleware(BaseHTTPMiddleware):
@@ -53,16 +67,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return self._unauthorized("未登录，请先登录")
 
         token = auth_header[len("Bearer "):]
-
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            username = payload.get("sub")
-            if not username:
-                return self._unauthorized("无效的凭证")
-            if username != config.get("security.username"):
-                return self._unauthorized("无效的凭证")
-        except JWTError:
-            return self._unauthorized("凭证已过期或无效")
+        username = await asyncio.to_thread(_verify_token_sync, token)
+        if username is None:
+            return self._unauthorized("无效的凭证")
 
         return await call_next(request)
 

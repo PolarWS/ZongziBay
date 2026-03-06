@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { parseMagnetApiV1MagnetParsePost } from '@/api/magnet'
 import { addTaskApiV1TasksAddPost } from '@/api/tasks'
-import { getPathConfigApiV1SystemPathsGet as getSystemPaths } from '@/api/system'
+import { getPathConfigApiV1SystemPathsGet as getSystemPaths, getRenameTemplatesApiV1SystemRenameTemplatesGet } from '@/api/system'
+import { assrtDetail, assrtDownloadBatch } from '@/api/assrt'
 import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
 import AppEmpty from '@/components/AppEmpty.vue'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,14 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   ArrowUpCircle,
   ArrowDownCircle,
@@ -23,9 +32,11 @@ import {
   Settings,
   FolderOpen,
   List,
-  FolderTree
+  FolderTree,
+  Pencil,
 } from 'lucide-vue-next'
 
+import { toast } from 'vue-sonner'
 import { performSmartRename, getExt, extractYearFromFiles } from '@/utils/renamer'
 import FileTreeView from '@/components/FileTreeView.vue'
 
@@ -40,8 +51,19 @@ const customTargetPath = ref('')
 const viewMode = ref<'list' | 'tree'>('list')
 const loading = ref(false)
 const errMsg = ref<string | null>(null)
-const files = ref<(API.MagnetFile & { newName: string; checked: boolean })[]>([])
+/** 文件行：magnet 解析或 ASSRT 详情；字幕模式下 fileIndex 为 null 表示整包，数字表示 filelist 下标 */
+const files = ref<(API.MagnetFile & { newName: string; checked: boolean; fileIndex?: number | null })[]>([])
 const systemPaths = ref<any>({})
+const renameTemplates = ref<{ movie?: string; tv?: string; anime?: string }>({})
+const renameTemplateDialogOpen = ref(false)
+const editRenameMovie = ref('')
+const editRenameTv = ref('')
+const editRenameAnime = ref('')
+/** 自定义替换内容（留空则用页面 TMDB 名称/年份） */
+const customRenameName = ref('')
+const customRenameYear = ref('')
+const editRenameName = ref('')
+const editRenameYear = ref('')
 const history = ref<string[]>([])
 const customKeywords = ref<string[]>([])
 const newKeyword = ref('')
@@ -65,6 +87,13 @@ const commonKeywords = [
 
 // 从路由与类型派生的计算属性
 const magnet = computed(() => (route.query.magnet as string) || '')
+const subtitleId = computed(() => {
+  const v = route.query.subtitleId as string
+  if (!v) return null
+  const n = parseInt(v, 10)
+  return Number.isFinite(n) ? n : null
+})
+const isSubtitleMode = computed(() => subtitleId.value != null && !magnet.value.trim())
 const tmdbName = computed(() => (route.query.tmdbName as string) || '')
 const tmdbYear = computed(() => (route.query.tmdbYear as string) || '')
 const category = computed(() => (route.query.category as string) || '')
@@ -74,17 +103,33 @@ const defaultType = computed(() => {
   if (['205', '208'].includes(category.value)) return 'tv'
   return 'movie'
 })
-const info = computed(() => ({
-  name: (route.query.name as string) || '',
-  size: (route.query.size as string) || '',
-  seeders: (route.query.seeders as string) || '',
-  leechers: (route.query.leechers as string) || '',
-  num_files: (route.query.num_files as string) || '',
-  username: (route.query.username as string) || '',
-  added: (route.query.added as string) || '',
-  category: category.value,
-  imdb: (route.query.imdb as string) || '',
-}))
+const subtitleDetail = ref<API.AssrtSubDetail | null>(null)
+const info = computed(() => {
+  if (isSubtitleMode.value && subtitleDetail.value) {
+    return {
+      name: subtitleDetail.value.native_name || subtitleDetail.value.title || `字幕 #${subtitleId.value}`,
+      size: subtitleDetail.value.size ? String(subtitleDetail.value.size) : '',
+      seeders: '',
+      leechers: '',
+      num_files: (subtitleDetail.value.filelist?.length ?? 0) ? String((subtitleDetail.value.filelist?.length ?? 0) + (subtitleDetail.value.url ? 1 : 0)) : '',
+      username: '',
+      added: subtitleDetail.value.upload_time || '',
+      category: '',
+      imdb: '',
+    }
+  }
+  return {
+    name: (route.query.name as string) || '',
+    size: (route.query.size as string) || '',
+    seeders: (route.query.seeders as string) || '',
+    leechers: (route.query.leechers as string) || '',
+    num_files: (route.query.num_files as string) || '',
+    username: (route.query.username as string) || '',
+    added: (route.query.added as string) || '',
+    category: category.value,
+    imdb: (route.query.imdb as string) || '',
+  }
+})
 const currentPaths = computed(() => {
   const type = selectedType.value
   if (type === 'tv') {
@@ -160,10 +205,19 @@ watch(tmdbYear, (v) => {
   if (v) editableYear.value = v
 }, { immediate: true })
 
-// 挂载时解析磁链并拉取系统路径
+function loadFileList() {
+  if (isSubtitleMode.value) fetchSubtitleFiles()
+  else if (magnet.value.trim()) fetchFiles()
+}
+
+// 路由 query 变化时重新拉取（例如从字幕页跳转到本页会复用组件）
+watch([subtitleId, magnet], () => {
+  loadFileList()
+}, { immediate: false })
+
 onMounted(() => {
-  fetchFiles()
   fetchPaths()
+  loadFileList()
 })
 
 // 格式化文件大小显示
@@ -225,12 +279,67 @@ const fetchFiles = async () => {
   }
 }
 
-// 获取系统路径配置
+// 字幕模式：用 ASSRT 详情接口拉取文件列表（整包 + filelist），不用 qB 解析
+const fetchSubtitleFiles = async () => {
+  const id = subtitleId.value
+  if (id == null) return
+  loading.value = true
+  errMsg.value = null
+  history.value = []
+  subtitleDetail.value = null
+  try {
+    const res = await assrtDetail({ id })
+    const data = (res as any)?.data ?? null
+    if (!data) {
+      errMsg.value = (res as any)?.message || '获取字幕详情失败'
+      files.value = []
+      return
+    }
+    subtitleDetail.value = data as API.AssrtSubDetail
+    const list: (API.MagnetFile & { newName: string; checked: boolean; fileIndex?: number | null })[] = []
+    const baseName = tmdbName.value || data.native_name || data.title || `字幕${id}`
+    if (data.url) {
+      list.push({
+        name: data.filename || '整包',
+        path: '__package__',
+        size: data.size ?? 0,
+        newName: baseName ? `${baseName}/${(data.filename || 'package')}` : (data.filename || 'package'),
+        checked: false,
+        fileIndex: null,
+      })
+    }
+    const subExts = ['.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx']
+    ;(data.filelist || []).forEach((f: API.AssrtFileListItem, i: number) => {
+      const name = f.f || f.url || ''
+      const ext = getExt(name)
+      const isSub = subExts.includes(ext)
+      list.push({
+        name,
+        path: f.url || '',
+        size: parseInt(String(f.s || 0), 10) || 0,
+        newName: baseName ? `${baseName}/${name}` : name,
+        checked: isSub,
+        fileIndex: i,
+      })
+    })
+    files.value = list
+  } finally {
+    loading.value = false
+  }
+}
+
+// 获取系统路径配置与智能重命名模板
 const fetchPaths = async () => {
   try {
-    const res = await getSystemPaths()
-    if (res && res.code === 200) {
-      systemPaths.value = res.data || {}
+    const [pathsRes, templatesRes] = await Promise.all([
+      getSystemPaths(),
+      getRenameTemplatesApiV1SystemRenameTemplatesGet(),
+    ])
+    if (pathsRes && pathsRes.code === 200) {
+      systemPaths.value = pathsRes.data || {}
+    }
+    if (templatesRes && templatesRes.code === 200 && templatesRes.data) {
+      renameTemplates.value = templatesRes.data
     }
   } catch (e) {
     console.error(e)
@@ -296,16 +405,83 @@ const toggleKeyword = (keyword: string) => {
   })
 }
 
-// 智能重命名并保存历史
+// 智能重命名并保存历史（使用 config 中的模板与自定义内容）
 const smartRename = () => {
   saveHistory()
-  performSmartRename(files.value, selectedType.value as 'movie' | 'tv' | 'anime' | 'default', tmdbName.value || info.value.name, editableYear.value)
+  const name = (customRenameName.value?.trim() || tmdbName.value || info.value.name || '').trim()
+  const year = (customRenameYear.value?.trim() || editableYear.value || '').trim()
+  performSmartRename(
+    files.value,
+    selectedType.value as 'movie' | 'tv' | 'anime' | 'default',
+    name,
+    year || undefined,
+    renameTemplates.value,
+  )
 }
 
-// 确认添加任务并跳转首页
+// 打开智能重命名模板弹窗：模板用 config/会话缓存，内容用当前页面识别结果预填（可修改）
+const openRenameTemplateDialog = () => {
+  editRenameMovie.value = renameTemplates.value.movie ?? ''
+  editRenameTv.value = renameTemplates.value.tv ?? ''
+  editRenameAnime.value = renameTemplates.value.anime ?? ''
+  // 资源名、年份：优先用当前页面已识别/输入的值，便于用户看到并修改
+  editRenameName.value = (customRenameName.value || tmdbName.value || info.value?.name || '').trim()
+  editRenameYear.value = (customRenameYear.value || editableYear.value || '').trim()
+  renameTemplateDialogOpen.value = true
+}
+
+// 确认并应用自定义模板与内容（仅当次会话生效）
+const confirmRenameTemplateDialog = () => {
+  renameTemplates.value = {
+    movie: editRenameMovie.value.trim() || undefined,
+    tv: editRenameTv.value.trim() || undefined,
+    anime: editRenameAnime.value.trim() || undefined,
+  }
+  customRenameName.value = editRenameName.value.trim() || ''
+  customRenameYear.value = editRenameYear.value.trim() || ''
+  renameTemplateDialogOpen.value = false
+}
+
+// 确认添加任务并跳转首页（字幕模式走 assrtDownload，否则走 qB 任务接口）
 const onConfirm = async () => {
   if (loading.value) return
+  const id = subtitleId.value
   const link = magnet.value.trim()
+  if (isSubtitleMode.value) {
+    if (id == null) return
+    const selectedFiles = files.value.filter(f => f.checked)
+    if (selectedFiles.length === 0) {
+      errMsg.value = '请至少勾选一个文件'
+      return
+    }
+    loading.value = true
+    errMsg.value = null
+    const targetPath = (customTargetPath.value || currentPaths.value.target || '').trim()
+    const downloadPath = (customSourcePath.value || currentPaths.value.download || '').trim()
+    if (!targetPath) {
+      errMsg.value = '请选择或填写归档路径（任务设置中的目标路径）'
+      return
+    }
+    try {
+      const res = await assrtDownloadBatch({
+        id,
+        target_path: targetPath,
+        download_path: downloadPath || undefined,
+        items: selectedFiles.map(f => ({
+          file_index: f.fileIndex ?? undefined,
+          file_rename: f.newName || f.name || undefined,
+        })),
+      })
+      const msg = (res as any)?.data?.message
+      if (msg) toast.success(msg)
+      router.push('/')
+    } catch (e: any) {
+      errMsg.value = e?.message || '添加字幕任务失败'
+    } finally {
+      loading.value = false
+    }
+    return
+  }
   if (!link) return
   loading.value = true
   errMsg.value = null
@@ -365,7 +541,8 @@ const onCancel = () => {
               <span class="mt-1">{{ info.name || '未命名资源' }}</span>
            </div>
            <div class="text-xs text-muted-foreground break-all pl-2 sm:pl-4">
-              {{ magnet || '无磁力链接' }}
+              <template v-if="isSubtitleMode">字幕 #{{ subtitleId }}</template>
+              <template v-else>{{ magnet || '无磁力链接' }}</template>
            </div>
         </div>
 
@@ -523,6 +700,15 @@ const onCancel = () => {
             <Button size="sm" variant="outline" class="h-8 text-xs px-3" @click="smartRename">
               智能重命名
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              class="h-8 w-8 p-0 shrink-0"
+              title="自定义重命名模板"
+              @click="openRenameTemplateDialog"
+            >
+              <Pencil class="w-4 h-4" />
+            </Button>
             <Button 
               v-if="canUndo"
               size="sm" 
@@ -643,4 +829,84 @@ const onCancel = () => {
       </div>
     </div>
   </div>
+
+  <!-- 智能重命名模板自定义弹窗 -->
+  <Dialog v-model:open="renameTemplateDialogOpen">
+    <DialogContent class="max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>自定义重命名模板</DialogTitle>
+        <DialogDescription>
+          修改后仅当次会话生效，下次进入页面会从 config 重新加载。下方占位符会在重命名时被替换。
+        </DialogDescription>
+      </DialogHeader>
+      <div class="space-y-4 py-2">
+        <div class="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
+          <div class="font-medium text-foreground mb-1.5">占位符</div>
+          <div class="flex flex-wrap gap-x-3 gap-y-1">
+            <span><code class="bg-muted px-1 rounded">{name}</code> 资源名</span>
+            <span><code class="bg-muted px-1 rounded">{year}</code> 年份</span>
+            <span><code class="bg-muted px-1 rounded">{season}</code> 季数</span>
+            <span><code class="bg-muted px-1 rounded">{ss}</code> 季数补零2位</span>
+            <span><code class="bg-muted px-1 rounded">{episode}</code> 集数</span>
+            <span><code class="bg-muted px-1 rounded">{ee}</code> 集数补零2位</span>
+            <span><code class="bg-muted px-1 rounded">{extra}</code> PV/Menu等</span>
+            <span><code class="bg-muted px-1 rounded">{sub_suffix}</code> 字幕后缀</span>
+            <span><code class="bg-muted px-1 rounded">{ext}</code> 扩展名</span>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <Label class="text-xs">电影 (movie)</Label>
+          <Input
+            v-model="editRenameMovie"
+            class="font-mono text-xs"
+            placeholder="{name} ({year})/{name} ({year}){extra}{sub_suffix}{ext}"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label class="text-xs">剧集 (tv)</Label>
+          <Input
+            v-model="editRenameTv"
+            class="font-mono text-xs"
+            placeholder="{name}/Season {season}/{name} S{ss}E{ee}{extra}{sub_suffix}{ext}"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label class="text-xs">番剧 (anime)</Label>
+          <Input
+            v-model="editRenameAnime"
+            class="font-mono text-xs"
+            placeholder="{name}/Season {season}/{name} S{ss}E{ee}{extra}{sub_suffix}{ext}"
+          />
+        </div>
+        <div class="border-t border-border pt-4 space-y-3">
+          <div class="font-medium text-sm text-foreground">替换内容（已按当前页面识别预填，可修改）</div>
+          <p class="text-xs text-muted-foreground">
+            下方为当前识别到的资源名与年份，可直接修改；智能重命名时将用此处内容替换模板中的 {name}、{year}。
+          </p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label class="text-xs">资源名（对应 {name}）</Label>
+              <Input
+                v-model="editRenameName"
+                class="text-xs"
+                placeholder="如：进击的巨人"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label class="text-xs">年份（对应 {year}，电影常用）</Label>
+              <Input
+                v-model="editRenameYear"
+                class="text-xs"
+                placeholder="如：2023"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" @click="renameTemplateDialogOpen = false">取消</Button>
+        <Button @click="confirmRenameTemplateDialog">确定</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
 </template>

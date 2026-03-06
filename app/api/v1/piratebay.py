@@ -1,6 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Query
+from fastapi.concurrency import run_in_threadpool
 
 from app.schemas.base import BaseResponse, ErrorCode
 from app.schemas.piratebay import PirateBayTorrent
@@ -18,7 +19,7 @@ async def search_torrents(
     在海盗湾搜索种子资源。
     """
     try:
-        results = service.search(query=q)
+        results = await run_in_threadpool(service.search, query=q)
         return BaseResponse.success(data=results)
     except Exception as e:
         return BaseResponse.fail(code=ErrorCode.SYSTEM_ERROR, message="搜索失败")
