@@ -1,6 +1,6 @@
 from typing import Any, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AnimeGardenPublisher(BaseModel):
@@ -33,8 +33,7 @@ class AnimeGardenResource(BaseModel):
     fansub: Optional[AnimeGardenFansub] = None
     subjectId: Optional[int] = None
 
-    class Config:
-        extra = "ignore"
+    model_config = ConfigDict(extra="ignore")
 
 
 class AnimeGardenPagination(BaseModel):
@@ -53,8 +52,7 @@ class AnimeGardenResponse(BaseModel):
     filter: Optional[dict] = None
     timestamp: Optional[str] = None
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
 
 class AnimeGardenSearchResult(BaseModel):
@@ -75,8 +73,7 @@ class AnimeGardenTeam(BaseModel):
     providerId: Optional[str] = None
     avatar: Optional[Any] = None  # 上游可能为 str 或 dict
 
-    class Config:
-        extra = "ignore"
+    model_config = ConfigDict(extra="ignore")
 
 
 class AnimeGardenTeamsResponse(BaseModel):
@@ -84,5 +81,4 @@ class AnimeGardenTeamsResponse(BaseModel):
     status: str
     teams: List[AnimeGardenTeam]
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")

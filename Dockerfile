@@ -36,6 +36,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY app ./app
 COPY sql ./sql
+COPY VERSION ./VERSION
 COPY config.yml ./config.yml.default
 
 # Copy built frontend from Stage 1

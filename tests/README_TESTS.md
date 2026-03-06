@@ -5,7 +5,9 @@
 | 文件 | 覆盖范围 |
 |------|----------|
 | `test_api.py` | API 冒烟：健康检查、登录/失败、/me 未授权/已授权、任务列表、通知列表、系统路径 |
+| `test_config.py` | **配置**：`_deep_merge_default` 合并、`Config.get` 点号键、`_all_keys_set` 叶子键、环境变量覆盖（ZONGZI_*） |
 | `test_task_monitor.py` | 任务监控：单文件/嵌套判断、移动 vs 复制决策、**字幕任务移动/复制**、**_process_copy 复制**（临时目录+假文件，不依赖 qB） |
+| `test_qb_task.py` | **模拟 qB 下载任务**：`TaskService._append_trackers`、按 type 的路径解析、`add_task` 与 DB/qB mock；`TaskMonitor._map_status`、qB 无种子时同步取消/完成、qB 返回 downloading 时状态更新 |
 | `test_magnet_service.py` | 磁力：`normalize_info_hash`（40/32 位）、`MagnetService._append_trackers`（mock config） |
 | `test_security.py` | JWT：`create_access_token` 生成与可解析性、过期时间 |
 
