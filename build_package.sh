@@ -9,15 +9,21 @@ IMAGE_WITH_TAG="${REPO_NAME}:${VERSION}"
 LATEST_TAG="${REPO_NAME}:latest"
 OUTPUT_FILE="${REPO_NAME}_${VERSION}.tar"
 
+# --- 1.5 获取当前时区 ---
+# 尝试从 /etc/timezone 获取，如果不存在则使用 UTC
+TZ=$(cat /etc/timezone 2>/dev/null || echo "UTC")
+echo "Detected host timezone: $TZ"
+
 # --- 2. 构建镜像 (同时打两个标签) ---
 echo "----------------------------------------"
 echo "Step 1: Building Docker Image..."
 echo "Tag 1: $IMAGE_WITH_TAG"
 echo "Tag 2: $LATEST_TAG"
+echo "Timezone: $TZ"
 echo "----------------------------------------"
 
-# 使用多个 -t 参数，确保同一个 Image ID 拥有两个标签
-docker build -t "$IMAGE_WITH_TAG" -t "$LATEST_TAG" .
+# 使用多个 -t 参数，确保同一个 Image ID 拥有两个标签，并传入时区参数
+docker build --build-arg TZ="$TZ" -t "$IMAGE_WITH_TAG" -t "$LATEST_TAG" .
 
 # --- 3. 导出镜像到 tar ---
 echo ""

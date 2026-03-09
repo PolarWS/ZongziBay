@@ -96,7 +96,7 @@ onMounted(() => {
         </div>
     </div>
 
-    <div class="border-t border-border bg-card pt-12 pb-20 relative z-20 shadow-sm overflow-hidden">
+    <div class="border border-border rounded-xl bg-card pt-12 pb-20 relative z-20 shadow-sm overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 md:px-10">
             <div class="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-8 lg:gap-12 items-start">
                  <!-- 左侧边栏 -->

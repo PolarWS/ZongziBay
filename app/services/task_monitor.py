@@ -71,6 +71,8 @@ class TaskMonitor:
             return
 
         client = magnet_service._get_client()
+        processed_hashes = set() # 记录本轮已处理的 Hash
+        processed_target_dirs = set() # 记录本轮已占用的目标目录，防止不同任务往同一个地方移动/重命名
 
         for task in active_tasks:
             try:
@@ -94,6 +96,11 @@ class TaskMonitor:
                 if len(torrent_hash) == 32:
                     torrent_hash = normalize_info_hash(torrent_hash)
 
+                if torrent_hash in processed_hashes:
+                    logger.debug(f"跳过重复 Hash 任务处理: {task['id']} (Hash={torrent_hash})")
+                    continue
+                processed_hashes.add(torrent_hash)
+
                 if not client:
                     logger.warning("无法连接 qBittorrent，跳过种子任务检查")
                     continue
@@ -106,17 +113,38 @@ class TaskMonitor:
                         logger.info(f"任务 {task['id']} 在 qB 中不存在，标记为 completed")
                         db.update_task_status(task['id'], 'completed')
                         continue
-                    # 同 Hash 的种子在 qB 中只存在一个，若被取消/删除则其他「下载中」任务会一直卡住，此处同步为已取消
+                    
+                    # 正在下载/移动的任务在 qB 中消失，尝试重新推送
                     if task['taskStatus'] in ('downloading', 'pending', 'moving'):
-                        logger.info(f"任务 {task['id']} 在 qBittorrent 中未找到（可能被同 Hash 任务取消），标记为已取消")
-                        db.update_task_status(task['id'], 'cancelled')
-                        db.insert_notification(
-                            title="任务已同步取消",
-                            content=f"任务 {task['taskName']} 在 qBittorrent 中已不存在（同一种子可能已被其他任务取消），已标记为已取消",
-                            type=NotificationType.WARNING.value
-                        )
-                        continue
-                    logger.warning(f"任务 {task['id']} (Hash: {torrent_hash}) 在 qBittorrent 中未找到")
+                        logger.info(f"任务 {task['id']} 在 qBittorrent 中未找到，尝试重新推送...")
+                        try:
+                            from app.services.task_service import task_service
+                            file_tasks = db.get_file_tasks(task['id'])
+                            success = task_service.push_to_qb(
+                                task_id=task['id'],
+                                source_url=task.get('sourceUrl', ''),
+                                source_path=task.get('sourcePath', ''),
+                                torrent_hash=torrent_hash,
+                                file_tasks=file_tasks
+                            )
+                            if success:
+                                db.insert_notification(
+                                    title="任务已自动重推",
+                                    content=f"任务 {task['taskName']} 在 qB 中缺失，已尝试自动重推下载",
+                                    type=NotificationType.WARNING.value
+                                )
+                                continue
+                        except Exception as e:
+                            logger.error(f"重推任务 {task['id']} 失败: {e}")
+
+                    # 无法重推或重推失败，标记为已取消
+                    logger.info(f"任务 {task['id']} 在 qBittorrent 中未找到，且无法恢复，标记为已取消")
+                    db.update_task_status(task['id'], 'cancelled')
+                    db.insert_notification(
+                        title="任务已同步取消",
+                        content=f"任务 {task['taskName']} 在 qBittorrent 中已不存在且无法恢复，已标记为已取消",
+                        type=NotificationType.WARNING.value
+                    )
                     continue
 
                 qb_state = torrent_info.get('state', '')
@@ -136,9 +164,22 @@ class TaskMonitor:
 
                 # 任务刚完成：执行重命名、移动等后续处理
                 # 注意：如果 new_status 是 seeding，也视为下载完成，需要触发处理
-                is_just_completed = (new_status in ['completed', 'seeding']) and (current_status not in ['completed', 'seeding'])
+                # 只有进度达到 100% 才触发后续处理
+                is_just_completed = (new_status in ['completed', 'seeding']) and (current_status not in ['completed', 'seeding']) and progress >= 100
                 
                 if is_just_completed:
+                    # 检查目标目录冲突：防止不同任务同时往同一个地方移动/重命名
+                    try:
+                        file_tasks = db.get_file_tasks(task['id'])
+                        target_dir = self._get_task_qb_target_path(task, file_tasks)
+                        if target_dir:
+                            if target_dir in processed_target_dirs:
+                                logger.warning(f"目标目录冲突: {target_dir} 已在本轮循环中被处理，跳过任务 {task['id']} (待下一轮重试)")
+                                continue
+                            processed_target_dirs.add(target_dir)
+                    except Exception as e:
+                        logger.warning(f"检查目标目录冲突失败: {e}")
+
                     logger.info(f"任务 {task['id']} 已完成 (状态: {new_status})，开始执行后续处理: {torrent_info.get('name')}")
                     db.insert_notification(title="任务下载完成", content=f"任务 {task['taskName']} 下载完成，开始后续处理", type=NotificationType.SUCCESS.value)
                     try:
@@ -264,7 +305,8 @@ class TaskMonitor:
     def _map_status(self, qb_state: str) -> str:
         """将 qBittorrent 状态映射为系统状态"""
         # uploading/stalledUP 等 = 已做种/完成
-        if qb_state in ['uploading', 'stalledUP', 'queuedUP', 'checkingUP', 'forcedUP', 'pausedUP']:
+        # 注意：checkingUP 状态可能表示正在校验，此时不应直接视为已完成
+        if qb_state in ['uploading', 'stalledUP', 'queuedUP', 'forcedUP', 'pausedUP']:
             # 检查是否开启做种监控
             limit_ratio = float(config.get("qbittorrent.seeding.limit_ratio", -1.0))
             if limit_ratio >= 0:
@@ -272,6 +314,8 @@ class TaskMonitor:
             return 'completed'
         elif qb_state in ['error', 'missingFiles']:
             return 'error'
+        elif qb_state in ['checkingUP', 'checkingDL', 'checkingResumeData']:
+            return 'checking'
         else:
             return 'downloading'  # downloading, stalledDL, metaDL 等
 
@@ -430,8 +474,14 @@ class TaskMonitor:
                     # 重命名后：文件在 content_path（种子根目录）下，名为 file_rename
                     src_full = os.path.normpath(os.path.join(content_path, dest_name))
                     if not os.path.exists(src_full):
-                        # 未重命名或失败：源路径为 save_path + sourcePath（不要用 content_path+sourcePath 会重复根目录）
+                        # 未重命名或失败：源路径为 save_path + sourcePath
                         src_full = os.path.normpath(os.path.join(save_path_resolved, src_rel))
+                        # 模糊尝试：处理 NoSubfolder 导致的根目录剥离
+                        if not os.path.exists(src_full) and '/' in src_rel:
+                            src_rel_no_root = src_rel.split('/', 1)[1]
+                            src_full_alt = os.path.normpath(os.path.join(save_path_resolved, src_rel_no_root))
+                            if os.path.exists(src_full_alt):
+                                src_full = src_full_alt
                     if not os.path.exists(src_full):
                         logger.warning(f"复制跳过（源不存在）: {src_full}")
                         db.insert_notification(title="复制跳过", content=f"源文件不存在，未复制: {dest_name}", type=NotificationType.WARNING.value)
@@ -569,6 +619,17 @@ class TaskMonitor:
         if not file_tasks:
             return
         logger.info(f"开始处理任务 {task_id} 的文件重命名 ({len(file_tasks)} 个文件)...")
+        
+        # 获取 qB 中的最新文件列表，用于纠正路径（处理 NoSubfolder 布局）
+        qb_files = []
+        try:
+            qb_files = client.get_torrent_files(torrent_hash)
+        except Exception as e:
+            logger.warning(f"获取种子文件列表失败，重命名将直接使用 DB 路径: {e}")
+
+        def normalize(p):
+            return (p or "").replace('\\', '/').strip('/')
+
         for ft in file_tasks:
             if ft['file_status'] == 'completed':
                 continue
@@ -576,46 +637,74 @@ class TaskMonitor:
             file_rename = ft['file_rename']
             if not file_rename or not old_path:
                 continue
-            old_path = old_path.replace('\\', '/')
+
+            # 纠正 old_path：如果在 qB 中找不到精确匹配，尝试模糊匹配
+            real_old_path = old_path.replace('\\', '/')
+            norm_old = normalize(old_path)
+            
+            match_found = False
+            if qb_files:
+                # 1. 精确匹配
+                for f in qb_files:
+                    f_name = f.get('name', '')
+                    if normalize(f_name) == norm_old:
+                        real_old_path = f_name
+                        match_found = True
+                        break
+                
+                # 2. 模糊匹配：处理 NoSubfolder 导致的根目录剥离
+                if not match_found:
+                    for f in qb_files:
+                        f_name = f.get('name', '')
+                        norm_f = normalize(f_name)
+                        if norm_old.endswith('/' + norm_f) or norm_f.endswith('/' + norm_old):
+                            logger.info(f"纠正重命名的源文件路径: {old_path} -> {f_name}")
+                            real_old_path = f_name
+                            match_found = True
+                            break
+
+            # 计算 new_path
             file_rename = file_rename.replace('\\', '/')
             if '/' not in file_rename:
                 # 仅改文件名，保留原目录
-                if '/' in old_path:
-                    dir_name = os.path.dirname(old_path)
+                if '/' in real_old_path:
+                    dir_name = os.path.dirname(real_old_path)
                     new_path = f"{dir_name}/{file_rename}"
                 else:
                     new_path = file_rename
             else:
                 new_path = file_rename
+
             try:
-                norm_old = os.path.normpath(old_path)
-                norm_new = os.path.normpath(new_path)
-                if norm_old == norm_new:  # 路径相同，无需重命名
+                norm_old_cmp = os.path.normpath(real_old_path)
+                norm_new_cmp = os.path.normpath(new_path)
+                if norm_old_cmp == norm_new_cmp:  # 路径相同，无需重命名
                     db.update_file_task_status(ft['id'], 'completed')
                     continue
             except Exception:
-                if old_path == new_path:
+                if real_old_path == new_path:
                     db.update_file_task_status(ft['id'], 'completed')
                     continue
-            logger.info(f"正在重命名文件: {old_path} -> {new_path}")
+            
+            logger.info(f"正在重命名文件: {real_old_path} -> {new_path}")
             try:
-                if client.rename_file(torrent_hash, old_path, new_path):
+                if client.rename_file(torrent_hash, real_old_path, new_path):
                     db.update_file_task_status(ft['id'], 'completed')
-                    logger.info(f"重命名成功: {old_path} -> {new_path}")
-                    db.insert_notification(title="重命名成功", content=f"{old_path} -> {new_path}", type=NotificationType.SUCCESS.value)
+                    logger.info(f"重命名成功: {real_old_path} -> {new_path}")
+                    db.insert_notification(title="重命名成功", content=f"{real_old_path} -> {new_path}", type=NotificationType.SUCCESS.value)
                 else:
-                    if client.rename_folder(torrent_hash, old_path, new_path):
+                    if client.rename_folder(torrent_hash, real_old_path, new_path):
                         db.update_file_task_status(ft['id'], 'completed')
-                        logger.info(f"文件夹重命名成功: {old_path} -> {new_path}")
-                        db.insert_notification(title="文件夹重命名成功", content=f"{old_path} -> {new_path}", type=NotificationType.SUCCESS.value)
+                        logger.info(f"文件夹重命名成功: {real_old_path} -> {new_path}")
+                        db.insert_notification(title="文件夹重命名成功", content=f"{real_old_path} -> {new_path}", type=NotificationType.SUCCESS.value)
                     else:
-                        logger.error(f"重命名失败: {old_path} -> {new_path}")
+                        logger.error(f"重命名失败: {real_old_path} -> {new_path}")
                         db.update_file_task_status(ft['id'], 'failed', "QB API returned fail")
-                        db.insert_notification(title="重命名失败", content=f"{old_path} -> {new_path}: QB API fail", type=NotificationType.ERROR.value)
+                        db.insert_notification(title="重命名失败", content=f"{real_old_path} -> {new_path}: QB API fail", type=NotificationType.ERROR.value)
             except Exception as e:
                 logger.error(f"重命名异常: {e}")
                 db.update_file_task_status(ft['id'], 'failed', str(e))
-                db.insert_notification(title="重命名异常", content=f"{old_path} -> {new_path}: {e}", type=NotificationType.ERROR.value)
+                db.insert_notification(title="重命名异常", content=f"{real_old_path} -> {new_path}: {e}", type=NotificationType.ERROR.value)
 
     def _maybe_move_location(self, client, task_id: int, torrent_hash: str, torrent_info: dict, target_path: str) -> tuple:
         """尝试移动任务到目标路径，返回 (is_moved, local_mkdir_path, qb_move_path)"""

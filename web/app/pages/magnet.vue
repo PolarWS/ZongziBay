@@ -407,6 +407,12 @@ const toggleKeyword = (keyword: string) => {
 
 // 智能重命名并保存历史（使用 config 中的模板与自定义内容）
 const smartRename = () => {
+  const selectedFiles = files.value.filter(f => f.checked)
+  if (selectedFiles.length === 0) {
+    toast.warning('请先勾选需要重命名的文件')
+    return
+  }
+
   saveHistory()
   const name = (customRenameName.value?.trim() || tmdbName.value || info.value.name || '').trim()
   const year = (customRenameYear.value?.trim() || editableYear.value || '').trim()
@@ -417,6 +423,7 @@ const smartRename = () => {
     year || undefined,
     renameTemplates.value,
   )
+  toast.success(`已为 ${selectedFiles.length} 个文件生成新名称`)
 }
 
 // 打开智能重命名模板弹窗：模板用 config/会话缓存，内容用当前页面识别结果预填（可修改）

@@ -419,6 +419,9 @@ export function performSmartRename(
   const template = type !== 'default' ? templates?.[type] : undefined
 
   for (const file of files) {
+    // 仅重命名选中的文件
+    if (!file.checked) continue
+
     const originalName = file.name || file.path || ''
     const ext = getExt(originalName)
 

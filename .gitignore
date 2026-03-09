@@ -53,4 +53,5 @@ ZongziBay.db
 config-prod.yml
 
 # Docker & Build Artifacts
-zongzibay_latest.tar
+publish.ps1
+zongzibay_*.tar

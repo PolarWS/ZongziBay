@@ -20,6 +20,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Set timezone build argument (default to UTC)
+ARG TZ=UTC
+ENV TZ=${TZ}
+
+# Install system dependencies and set timezone
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
+    && ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
