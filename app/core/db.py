@@ -131,12 +131,24 @@ class Database:
         conn.commit()
         return cur.rowcount > 0
         
+    def get_tasks_by_hash(self, torrent_hash: str) -> List[Dict[str, Any]]:
+        """根据 Hash 获取所有相关的任务"""
+        conn = self.get_conn()
+        cur = conn.cursor()
+        # 匹配 taskName (可能存的是 Hash) 或 sourceUrl 中的 Hash
+        cur.execute(
+            "SELECT * FROM download_task WHERE isDelete = 0 AND (taskName = ? OR sourceUrl LIKE ?)",
+            (torrent_hash, f"%{torrent_hash}%")
+        )
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
+        
     def get_active_tasks(self) -> List[Dict[str, Any]]:
         """获取所有未完成的任务 (downloading, moving, seeding 等)"""
         conn = self.get_conn()
         cur = conn.cursor()
         cur.execute(
-            "SELECT * FROM download_task WHERE isDelete = 0 AND taskStatus NOT IN ('completed', 'error', 'paused')"
+            "SELECT * FROM download_task WHERE isDelete = 0 AND taskStatus NOT IN ('completed', 'error', 'paused', 'cancelled')"
         )
         rows = cur.fetchall()
         return [dict(row) for row in rows]
@@ -326,6 +338,7 @@ init_db = db.init_db
 insert_download_task = db.insert_download_task
 insert_file_task = db.insert_file_task
 get_download_tasks = db.get_download_tasks
+get_download_task_by_id = db.get_download_task_by_id
 get_active_tasks = db.get_active_tasks
 update_task_status = db.update_task_status
 get_file_tasks = db.get_file_tasks

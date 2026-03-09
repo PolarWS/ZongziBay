@@ -149,7 +149,7 @@ const loadConfig = async () => {
 }
 
 const saveConfig = async () => {
-  const cfg: Record<string, any> = structuredClone(originalConfig.value || {}) as any
+  const cfg: Record<string, any> = JSON.parse(JSON.stringify(originalConfig.value || {})) as any
 
   cfg.security = cfg.security || {}
   cfg.security.username = securityUsername.value

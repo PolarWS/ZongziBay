@@ -47,18 +47,18 @@ class TaskService:
                 torrent_hash = normalize_info_hash(match.group(1))
 
         if torrent_hash:
+            # 1. 检查 DB 中是否已有此 Hash 的活跃任务，若有则复用，避免“打架”
+            existing_db_tasks = db.get_tasks_by_hash(torrent_hash)
+            active_task = next((t for t in existing_db_tasks if t['taskStatus'] not in ('completed', 'error', 'paused', 'cancelled')), None)
+            if active_task:
+                logger.info(f"[TaskService] 检测到 DB 中已存在此 Hash 的活跃任务: {active_task['id']}，复用之")
+                return active_task['id']
+
+            # 2. 检查 qBittorrent 中是否已存在该任务
             existing_info = self.qb_client.get_torrent_info(torrent_hash)
             if existing_info:
-                # 任务已存在，复用现有任务
+                # 任务已存在 qB 但 DB 中没有活跃任务，插入一条新记录接管之
                 logger.info(f"[TaskService] 检测到任务已存在于 qBittorrent: {torrent_hash}，状态: {existing_info.get('state')}")
-                # 根据当前状态判断后续操作
-                # 无论是已完成还是下载中，都视为添加成功，并插入 DB 记录以便监控接管
-                # 注意：如果任务已经在 DB 中存在，可能需要避免重复插入或更新
-                # 这里暂且允许插入新记录（可能用户想重新走一遍流程），Monitor 会接管
-                
-                # 如果是已完成任务，可能需要直接触发后续处理（Monitor 会负责）
-                # 这里我们只负责记录日志，并不直接执行复制/移动，交给 Monitor 的循环去发现
-                pass
 
         # 1. 确定路径：优先使用请求中的路径，否则按 type 选择配置
         if request.type == 'tv':
@@ -116,56 +116,7 @@ class TaskService:
             logger.info(f"[TaskService] DB预插入成功 task_id={task_id}, 等待调用 qBittorrent...")
 
             # 3. 调用 qBittorrent API
-            # 如果之前已经检测到任务存在，则跳过 add_torrent
-            is_new_task = True
-            if torrent_hash:
-                 existing_info = self.qb_client.get_torrent_info(torrent_hash)
-                 if existing_info:
-                     logger.info(f"[TaskService] 任务已存在于 qB，跳过添加: {torrent_hash}")
-                     is_new_task = False
-                     
-                     # 如果需要过滤文件，即使是旧任务也尝试重新设置优先级
-                     if request.file_tasks:
-                         try:
-                             self._filter_torrent_files(torrent_hash, request.file_tasks)
-                         except Exception as e:
-                             logger.warning(f"为已存在的任务设置文件过滤失败: {e}")
-
-            if is_new_task:
-                if request.sourceUrl.startswith("magnet:?") and not torrent_hash:
-                    match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', request.sourceUrl)
-                    if match:
-                        torrent_hash = normalize_info_hash(match.group(1))
-
-                if request.file_tasks and not torrent_hash:
-                    raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="无法从链接解析Hash，不支持文件选择")
-
-                # 下载时追加 trackers 到磁力链接
-                download_url = self._append_trackers(request.sourceUrl, self.trackers)
-
-                # 有文件选择时先暂停添加，等元数据后设置优先级再恢复
-                should_filter_files = bool(request.file_tasks)
-                is_paused = should_filter_files
-                # 为避免只选部分文件时 qB 生成多余“种子名子目录”，统一使用 NoSubfolder
-                success = self.qb_client.add_torrent(
-                    urls=download_url,
-                    save_path=source_path,
-                    is_paused=is_paused,
-                    content_layout="NoSubfolder",
-                )
-                if not success:
-                    logger.error(f"[TaskService] qBittorrent 添加任务失败: url={request.sourceUrl}")
-                    raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="无法添加到 qBittorrent")
-
-                if should_filter_files:
-                    try:
-                        self._filter_torrent_files(torrent_hash, request.file_tasks)  # 设置选中 1，未选 0
-                        self.qb_client.resume_torrents(torrent_hash)
-                    except Exception as e:
-                        logger.error(f"[TaskService] 过滤文件失败: {e}")
-                        raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"过滤文件失败: {e}")
-            else:
-                 logger.info(f"[TaskService] 复用现有任务，未执行 add_torrent")
+            self.push_to_qb(task_id, request.sourceUrl, source_path, torrent_hash, request.file_tasks)
 
             # 4. 提交事务，添加通知
             conn.commit()
@@ -179,6 +130,82 @@ class TaskService:
             if isinstance(e, BusinessException):
                 raise e
             raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"添加任务失败: {str(e)}")
+
+    def push_to_qb(self, task_id: int, source_url: str, source_path: str, torrent_hash: str = None, file_tasks: list = None) -> bool:
+        """推送任务到 qBittorrent，不处理 DB 事务"""
+        try:
+            # 如果之前已经检测到任务存在，则跳过 add_torrent
+            is_new_task = True
+            if not torrent_hash and source_url.startswith("magnet:?"):
+                match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', source_url)
+                if match:
+                    torrent_hash = normalize_info_hash(match.group(1))
+
+            if torrent_hash:
+                 existing_info = self.qb_client.get_torrent_info(torrent_hash)
+                 if existing_info:
+                     logger.info(f"[TaskService] 任务 {task_id} 已存在于 qB，跳过添加: {torrent_hash}")
+                     is_new_task = False
+                     
+                     # 如果现有任务路径不一致，尝试更新路径
+                     existing_save_path = existing_info.get('save_path', '')
+                     if existing_save_path and source_path and self._norm_path(existing_save_path) != self._norm_path(source_path):
+                         logger.info(f"[TaskService] 任务 {task_id} 路径不匹配，尝试更新: {existing_save_path} -> {source_path}")
+                         try:
+                             self.qb_client.set_location(torrent_hash, source_path)
+                         except Exception as e:
+                             logger.warning(f"更新现有任务 {task_id} 路径失败: {e}")
+
+                     # 如果需要过滤文件，即使是旧任务也尝试重新设置优先级
+                     if file_tasks:
+                         try:
+                             self._filter_torrent_files(torrent_hash, file_tasks)
+                         except Exception as e:
+                             logger.warning(f"为已存在的任务 {task_id} 设置文件过滤失败: {e}")
+                     
+                     # 无论是否过滤文件，都确保任务处于运行状态
+                     try:
+                         self.qb_client.resume_torrents(torrent_hash)
+                     except Exception as e:
+                         logger.warning(f"恢复现有任务 {task_id} 失败: {e}")
+
+            if is_new_task:
+                if file_tasks and not torrent_hash:
+                    raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="无法从链接解析Hash，不支持文件选择")
+
+                # 下载时追加 trackers 到磁力链接
+                download_url = self._append_trackers(source_url, self.trackers)
+
+                # 有文件选择时先暂停添加，等元数据后设置优先级再恢复
+                should_filter_files = bool(file_tasks)
+                is_paused = should_filter_files
+                # 为避免只选部分文件时 qB 生成多余“种子名子目录”，统一使用 NoSubfolder
+                success = self.qb_client.add_torrent(
+                    urls=download_url,
+                    save_path=source_path,
+                    is_paused=is_paused,
+                    content_layout="NoSubfolder",
+                )
+                if not success:
+                    logger.error(f"[TaskService] qBittorrent 添加任务失败: task_id={task_id}, url={source_url}")
+                    raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="无法添加到 qBittorrent")
+
+                if should_filter_files:
+                    try:
+                        self._filter_torrent_files(torrent_hash, file_tasks)  # 设置选中 1，未选 0
+                        self.qb_client.resume_torrents(torrent_hash)
+                    except Exception as e:
+                        logger.error(f"[TaskService] 过滤文件失败: {e}")
+                        raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"过滤文件失败: {e}")
+            else:
+                 logger.info(f"[TaskService] 任务 {task_id} 复用现有任务，未执行 add_torrent")
+            
+            return True
+        except Exception as e:
+            logger.error(f"[TaskService] 推送任务 {task_id} 到 qB 异常: {e}")
+            if isinstance(e, BusinessException):
+                raise e
+            return False
 
     def cancel_task(self, task_id: int) -> bool:
         """取消任务：下载中/等待中可取消并删文件；做种中可取消并从 qB 移除（不删文件，适合复制完成的任务）"""
@@ -268,6 +295,12 @@ class TaskService:
             logger.warning(f"[TaskService] 判断做种文件位置失败: {e}，默认删除临时文件")
             return True
 
+    def _normalize_torrent_path(self, path: str) -> str:
+        """统一路径分隔符并移除首尾斜杠"""
+        if not path:
+            return ""
+        return path.replace('\\', '/').strip('/')
+
     def _filter_torrent_files(self, torrent_hash: str, file_tasks: list):
         """等待元数据并设置文件优先级（0=不下载，1=正常）"""
         timeout = 60
@@ -290,14 +323,36 @@ class TaskService:
 
         target_files = set()
         for ft in file_tasks:  # 构建需下载的文件路径集合
-            p = ft.sourcePath.replace('\\', '/')
-            target_files.add(p)
+            # 兼容 Pydantic 对象和字典
+            source_path = getattr(ft, 'sourcePath', None) or (ft.get('sourcePath') if isinstance(ft, dict) else None)
+            if source_path:
+                target_files.add(self._normalize_torrent_path(source_path))
 
         ids_to_download = []
         ids_to_skip = []
+        
+        logger.info(f"开始过滤文件: qB文件数={len(files)}, 目标文件数={len(target_files)}")
         for idx, f in enumerate(files):  # 按路径匹配分配优先级
-            f_name = f.get('name', '').replace('\\', '/')
-            if f_name in target_files:
+            f_path = self._normalize_torrent_path(f.get('name', ''))
+            
+            # 1. 精确匹配
+            if f_path in target_files:
+                ids_to_download.append(idx)
+                continue
+            
+            # 2. 模糊匹配：处理 NoSubfolder 导致的根目录剥离或路径差异
+            match_found = False
+            for target_p in target_files:
+                # 如果 qB 路径是目标路径的后缀 (e.g. qB: "a.mkv", Target: "Folder/a.mkv")
+                if target_p.endswith('/' + f_path):
+                    match_found = True
+                    break
+                # 如果目标路径是 qB 路径的后缀 (e.g. qB: "Folder/a.mkv", Target: "a.mkv")
+                if f_path.endswith('/' + target_p):
+                    match_found = True
+                    break
+            
+            if match_found:
                 ids_to_download.append(idx)
             else:
                 ids_to_skip.append(idx)

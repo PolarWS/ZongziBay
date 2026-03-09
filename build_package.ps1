@@ -12,14 +12,23 @@ $IMAGE_WITH_TAG = "${REPO_NAME}:$VERSION"
 $LATEST_TAG = "${REPO_NAME}:latest"
 $OUTPUT_FILE = "${REPO_NAME}_${VERSION}.tar"
 
+# --- 获取当前时区 ---
+$TZ = (Get-TimeZone).Id
+# Windows 时区名转换为 IANA 时区名 (针对中国)
+if ($TZ -eq "China Standard Time") {
+    $TZ = "Asia/Shanghai"
+}
+Write-Host "Detected host timezone: $TZ"
+
 # --- 2. 构建镜像 (同时打两个标签) ---
 Write-Host "----------------------------------------"
 Write-Host "Step 1: Building Docker Image [$IMAGE_WITH_TAG]..."
+Write-Host "With Timezone: $TZ"
 Write-Host "Also Tagging as [$LATEST_TAG]..."
 Write-Host "----------------------------------------"
 
-# 一次构建，两个标签
-docker build -t $IMAGE_WITH_TAG -t $LATEST_TAG .
+# 一次构建，两个标签，并传入时区参数 (使用引号处理可能的空格)
+docker build --build-arg "TZ=$TZ" -t $IMAGE_WITH_TAG -t $LATEST_TAG .
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Docker build failed!"

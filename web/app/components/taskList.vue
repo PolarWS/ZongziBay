@@ -93,6 +93,12 @@ const loadTasks = async (opts?: { silent?: boolean }) => {
         }
       }
       tasks.value.splice(0, tasks.value.length, ...merged)
+      
+      // 同步更新已选中的任务详情
+      if (selected.value) {
+        const updated = merged.find(t => t.id === selected.value?.id)
+        if (updated) selected.value = updated
+      }
     }
     total.value = nextTotal
   } finally {
@@ -292,8 +298,10 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
 
     <Dialog v-model:open="open">
       <DialogContent class="max-h-[85vh] overflow-y-auto overflow-x-auto w-[calc(100vw-1rem)] sm:w-full max-w-[min(56rem,100vw)] rounded-xl min-w-0">
-        <DialogHeader>
-          <DialogTitle class="text-lg font-semibold tracking-tight">{{ selected?.taskName || '任务详情' }}</DialogTitle>
+        <DialogHeader class="min-w-0">
+          <DialogTitle class="text-lg font-semibold tracking-tight break-all whitespace-normal leading-snug min-w-0">
+            {{ selected?.taskName || '任务详情' }}
+          </DialogTitle>
           <DialogDescription>
             任务 ID: {{ selected?.id }}
           </DialogDescription>

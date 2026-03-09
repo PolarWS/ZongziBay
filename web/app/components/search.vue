@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { ArrowRight, Search as SearchIcon, Clapperboard, Tv } from 'lucide-vue-next'
-import { watchDebounced } from '@vueuse/core'
+import { watchDebounced, onClickOutside } from '@vueuse/core'
 import { getSuggestionsApiV1TmdbSuggestionsGet } from '@/api/tmdb'
 
 const props = withDefaults(defineProps<{ type: 'movie' | 'tv' }>(), { type: 'movie' })
 const searchQuery = ref('')
 const isFocused = ref(false)
+const containerRef = ref<HTMLElement | null>(null)
 const router = useRouter()
 
 const suggestions = ref<string[]>([])
+
+onClickOutside(containerRef, () => {
+  isFocused.value = false
+})
 
 const handleSelect = (item: string) => {
   searchQuery.value = item
@@ -58,7 +63,7 @@ const submit = () => {
 </script>
 
 <template>
-  <div class="space-y-2">
+  <div class="space-y-2" ref="containerRef">
     <form class="relative" @submit.prevent="submit">
       <Input 
         id="input-26" 
