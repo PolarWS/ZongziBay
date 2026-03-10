@@ -2,6 +2,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -50,13 +51,43 @@ class Database:
 
         if os.path.exists(self.schema_path):
             try:
+                start = time.perf_counter()
+                logger.info("开始初始化数据库")
+                logger.info(f"数据库文件: {self.db_path}")
+                logger.info(f"初始化脚本: {self.schema_path}")
+
                 with open(self.schema_path, "r", encoding="utf-8") as f:
-                    sql = f.read()
-                conn.executescript(sql)
+                    sql_text = f.read()
+
+                # sqlite_sequence 是 SQLite 内置表（AUTOINCREMENT 才会出现），不能被 DROP/CREATE。
+                # 一些导出的 schema 会包含 sqlite_sequence 的 DDL/DML，这里统一跳过，避免初始化失败。
+                raw_statements = [s.strip() for s in sql_text.split(";")]
+                statements: List[str] = []
+                skipped = 0
+                for s in raw_statements:
+                    if not s:
+                        continue
+                    if "sqlite_sequence" in s:
+                        skipped += 1
+                        continue
+                    statements.append(s)
+
+                logger.info(f"准备执行 SQL 语句: {len(statements)} 条（跳过 {skipped} 条 sqlite_sequence 相关语句）")
+
+                # 逐条执行，便于输出创建过程日志，并精确定位失败语句
+                for idx, stmt in enumerate(statements, start=1):
+                    preview = " ".join(stmt.split())
+                    if len(preview) > 120:
+                        preview = preview[:120] + "..."
+                    logger.info(f"执行 SQL ({idx}/{len(statements)}): {preview}")
+                    cur.execute(stmt)
+
                 conn.commit()
-                logger.info("数据库初始化成功")
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                logger.info(f"数据库初始化成功（耗时 {elapsed_ms}ms）")
             except Exception as e:
-                logger.error(f"数据库初始化失败: {e}")
+                conn.rollback()
+                logger.exception(f"数据库初始化失败: {e}")
         else:
             logger.error(f"未找到数据库初始化脚本: {self.schema_path}")
 

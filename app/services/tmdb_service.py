@@ -31,12 +31,16 @@ class TMDBService:
 
     def __init__(self):
         self.tmdb = TMDb()
-        self.tmdb.api_key = config.get("tmdb.api_key")
-        self.tmdb.language = config.get("tmdb.language", "zh-CN")
+        self.reload_config()
         self.movie = Movie()
         self.tv = TV()
         self.search = Search()
         self.trending = Trending()
+
+    def reload_config(self) -> None:
+        """从当前运行时配置刷新 TMDB 客户端参数（设置页保存后可立即生效）。"""
+        self.tmdb.api_key = config.get("tmdb.api_key")
+        self.tmdb.language = config.get("tmdb.language", "zh-CN")
 
     @staticmethod
     def _extract_results(raw) -> List[Any]:

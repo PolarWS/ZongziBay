@@ -5,8 +5,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.config import config
 from app.core.security import (
-    ACCESS_TOKEN_EXPIRE_MINUTES,
     create_access_token,
+    get_access_token_expire_minutes,
     get_current_user,
 )
 from app.schemas.auth import Token, TokenData
@@ -23,7 +23,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     if form_data.username != conf_username or form_data.password != conf_password:
         raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="用户名或密码错误")
 
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_expires = timedelta(minutes=get_access_token_expire_minutes())
     access_token = create_access_token(
         data={"sub": form_data.username}, expires_delta=access_token_expires
     )

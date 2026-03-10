@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import config
-from app.core.security import SECRET_KEY, ALGORITHM
+from app.core.security import get_algorithm, get_secret_key
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ AUTH_WHITELIST = [
 def _verify_token_sync(token: str) -> Optional[str]:
     """同步校验 JWT，在线程池中调用以避免阻塞事件循环。返回 username 或 None。"""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, get_secret_key(), algorithms=[get_algorithm()])
         username = payload.get("sub")
         if not username or username != config.get("security.username"):
             return None

@@ -62,3 +62,10 @@ export async function assrtDownloadBatch(body: {
     data: body,
   })
 }
+
+/** 查询配额 GET /api/v1/subtitle/user/quota */
+export async function assrtQuota() {
+  return request<API.BaseResponse>('/api/v1/subtitle/user/quota', {
+    method: 'GET',
+  })
+}
