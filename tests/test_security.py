@@ -12,8 +12,8 @@ SECRET = "test-secret-key"
 ALGORITHM = "HS256"
 
 
-@patch("app.core.security.SECRET_KEY", SECRET)
-@patch("app.core.security.ALGORITHM", ALGORITHM)
+@patch("app.core.security.get_secret_key", lambda: SECRET)
+@patch("app.core.security.get_algorithm", lambda: ALGORITHM)
 def test_create_access_token_decodable():
     """生成 token 后可用相同密钥解析出 sub"""
     token = create_access_token(data={"sub": "admin"})
@@ -23,8 +23,8 @@ def test_create_access_token_decodable():
     assert "exp" in payload
 
 
-@patch("app.core.security.SECRET_KEY", SECRET)
-@patch("app.core.security.ALGORITHM", ALGORITHM)
+@patch("app.core.security.get_secret_key", lambda: SECRET)
+@patch("app.core.security.get_algorithm", lambda: ALGORITHM)
 def test_create_access_token_with_expires_delta():
     """指定 expires_delta 时过期时间正确"""
     token = create_access_token(data={"sub": "user"}, expires_delta=timedelta(minutes=5))
