@@ -22,6 +22,10 @@ class TaskMonitor:
         self.running = False
         self.thread = None
         self._stop_event = threading.Event()
+        # 分享率达标但未确认移动时，只警告一次，后续轮询静默跳过
+        self._seeding_skip_warned: set = set()
+        # 记录已由本程序复制完成归档的任务 id，用于做种完成时的删除策略
+        self._copy_completed_tasks: set[int] = set()
 
     def start(self):
         """启动监控线程（无 qB 时也启动，以便处理字幕等非 qB 任务）"""
@@ -187,10 +191,14 @@ class TaskMonitor:
                         # 执行处理，返回最终建议状态
                         final_status = self._handle_completed_task(client, task, torrent_hash, torrent_info)
                         if not final_status:
-                            final_status = new_status
+                            # 移动/复制未成功（返回 None），保持 moving 便于下次轮询重试，不标为 completed/seeding
+                            final_status = "moving"
                         
                         db.update_task_status(task['id'], final_status, progress)
-                        db.insert_notification(title="任务处理完成", content=f"任务 {task['taskName']} 后续处理完成", type=NotificationType.SUCCESS.value)
+                        if final_status == "moving":
+                            db.insert_notification(title="任务待重试", content=f"任务 {task['taskName']} 移动/复制未完成，将稍后自动重试", type=NotificationType.WARNING.value)
+                        else:
+                            db.insert_notification(title="任务处理完成", content=f"任务 {task['taskName']} 后续处理完成", type=NotificationType.SUCCESS.value)
                         
                         # 如果进入 seeding 状态，立即检查一次
                         if final_status == 'seeding':
@@ -405,12 +413,64 @@ class TaskMonitor:
             if use_qb_move:
                 logger.info(f"任务 {task['id']} 使用 qB 移动 (use_copy={use_copy}, 仅根目录文件={not has_any_folder})")
                 is_moved, local_path, qb_path = self._maybe_move_location(client, task['id'], torrent_hash, torrent_info, final_target_path)
+                limit_ratio = float(config.get("qbittorrent.seeding.limit_ratio", -1.0))
+                expected_final_status = 'seeding' if limit_ratio >= 0 else 'completed'
                 if is_moved:
-                    self._verify_move(client, torrent_hash, local_path, qb_path, file_tasks)
+                    ok = self._verify_move(client, torrent_hash, local_path, qb_path, file_tasks)
+                    if not ok:
+                        logger.warning(f"任务 {task['id']} 第一次移动验证失败，尝试重试一次移动: {qb_path}")
+                        db.insert_notification(
+                            title="移动任务重试",
+                            content=f"任务 {task['id']} 移动验证失败，正在重试移动到: {qb_path}",
+                            type=NotificationType.WARNING.value,
+                        )
+                        try:
+                            if client.set_location(torrent_hash, qb_path):
+                                ok = self._verify_move(client, torrent_hash, local_path, qb_path, file_tasks)
+                            else:
+                                ok = False
+                                logger.error(f"任务 {task['id']} 重试移动失败: {qb_path}")
+                                db.insert_notification(
+                                    title="移动任务重试失败",
+                                    content=f"任务 {task['id']} 重试移动到 {qb_path} 失败",
+                                    type=NotificationType.ERROR.value,
+                                )
+                        except Exception as e:
+                            ok = False
+                            logger.error(f"任务 {task['id']} 重试移动异常: {e}")
+                            db.insert_notification(
+                                title="移动任务重试异常",
+                                content=f"任务 {task['id']} 重试移动异常: {e}",
+                                type=NotificationType.ERROR.value,
+                            )
+                    if not ok:
+                        logger.warning(f"任务 {task['id']} 多次移动失败，降级为本程序复制")
+                        db.insert_notification(
+                            title="移动失败已降级为复制",
+                            content=f"任务 {task['id']} 多次移动失败，将改为本程序复制到目标路径",
+                            type=NotificationType.WARNING.value,
+                        )
+                        result = self._process_copy(client, task, torrent_hash, torrent_info, final_target_path, file_tasks)
+                        if result in ('seeding', 'completed'):
+                            self._copy_completed_tasks.add(task['id'])
+                        return result
+                    return expected_final_status
+
+                # 未触发移动：若已在目标路径，则视为后续处理完成，直接进入最终状态
+                try:
+                    current_save_path = torrent_info.get('save_path', '')
+                    if self._normalize_path_for_compare(current_save_path) == self._normalize_path_for_compare(qb_path):
+                        return expected_final_status
+                except Exception:
+                    pass
+
                 return None
             else:
                 logger.info(f"任务 {task['id']} 使用本程序复制 (多文件)")
-                return self._process_copy(client, task, torrent_hash, torrent_info, final_target_path, file_tasks)
+                result = self._process_copy(client, task, torrent_hash, torrent_info, final_target_path, file_tasks)
+                if result in ('seeding', 'completed'):
+                    self._copy_completed_tasks.add(task['id'])
+                return result
 
         except Exception as e:
             logger.error(f"处理文件移动/复制任务失败: {e}")
@@ -436,6 +496,28 @@ class TaskMonitor:
             parts = rel.split("/")
             return os.path.normpath(os.path.join(root, *parts))
         return path
+
+    def _find_source_by_extension(self, save_path_resolved: str, content_path: str, dest_name: str) -> str:
+        """当源路径不存在时，在下载目录下按目标文件扩展名找唯一同扩展名文件（兼容源已被重命名的情况）。"""
+        ext = os.path.splitext(dest_name)[1].lower()
+        if not ext:
+            return ""
+        search_dir = save_path_resolved
+        if content_path and os.path.isdir(content_path):
+            search_dir = content_path
+        if not search_dir or not os.path.isdir(search_dir):
+            return ""
+        try:
+            candidates = [
+                os.path.join(search_dir, f)
+                for f in os.listdir(search_dir)
+                if os.path.isfile(os.path.join(search_dir, f)) and os.path.splitext(f)[1].lower() == ext
+            ]
+            if len(candidates) == 1:
+                return candidates[0]
+        except OSError:
+            pass
+        return ""
 
     def _process_copy(self, client, task: dict, torrent_hash: str, torrent_info: dict, target_path: str, file_tasks: list = None) -> str | None:
         """执行复制操作。有 file_tasks 时按每条复制为「目标目录 + file_rename」，不保留种子根目录名；否则复制整个 content_path。"""
@@ -465,16 +547,21 @@ class TaskMonitor:
             save_path_resolved = self._resolve_path_for_local(save_path_raw, for_target=False) if save_path_raw else os.path.dirname(content_path)
             try:
                 last_dest_dir = ""
+                copied_count = 0
                 for ft in file_tasks:
                     src_rel = (ft.get('sourcePath') or '').replace('\\', '/')
                     dest_name = (ft.get('file_rename') or '').strip()
                     ft_target = (ft.get('targetPath') or '').replace('\\', '/')
                     if not dest_name:
                         continue
-                    # 重命名后：文件在 content_path（种子根目录）下，名为 file_rename
-                    src_full = os.path.normpath(os.path.join(content_path, dest_name))
+                    # 1) 单文件种子：content_path 即源文件路径，不要再拼 dest_name
+                    if os.path.isfile(content_path):
+                        src_full = content_path
+                    else:
+                        # 2) 多文件或目录：先试「重命名后」路径 content_path/dest_name
+                        src_full = os.path.normpath(os.path.join(content_path, dest_name))
                     if not os.path.exists(src_full):
-                        # 未重命名或失败：源路径为 save_path + sourcePath
+                        # 3) 未重命名或失败：源路径为 save_path + sourcePath
                         src_full = os.path.normpath(os.path.join(save_path_resolved, src_rel))
                         # 模糊尝试：处理 NoSubfolder 导致的根目录剥离
                         if not os.path.exists(src_full) and '/' in src_rel:
@@ -482,6 +569,9 @@ class TaskMonitor:
                             src_full_alt = os.path.normpath(os.path.join(save_path_resolved, src_rel_no_root))
                             if os.path.exists(src_full_alt):
                                 src_full = src_full_alt
+                    if not os.path.exists(src_full):
+                        # 4) 源可能已被重命名：在 save_path 下按扩展名找唯一同扩展名文件
+                        src_full = self._find_source_by_extension(save_path_resolved, content_path, dest_name)
                     if not os.path.exists(src_full):
                         logger.warning(f"复制跳过（源不存在）: {src_full}")
                         db.insert_notification(title="复制跳过", content=f"源文件不存在，未复制: {dest_name}", type=NotificationType.WARNING.value)
@@ -509,12 +599,18 @@ class TaskMonitor:
                         continue
                     os.makedirs(dest_dir, exist_ok=True)
                     shutil.copy2(src_full, dest_path)
+                    copied_count += 1
                     logger.info(f"已复制: {src_rel} -> {dest_path}")
-                copy_dest_msg = f"任务 {task['id']} 已按重命名复制到: {last_dest_dir}" if last_dest_dir else f"任务 {task['id']} 已按重命名复制到目标目录"
-                db.insert_notification(title="复制完成", content=copy_dest_msg, type=NotificationType.SUCCESS.value)
-                if config.get("qbittorrent.file_handling.copy_delete_on_complete", False):
-                    client.delete_torrents(torrent_hash, delete_files=True)
-                    return 'completed'
+                if copied_count > 0:
+                    copy_dest_msg = f"任务 {task['id']} 已按重命名复制到: {last_dest_dir}" if last_dest_dir else f"任务 {task['id']} 已按重命名复制到目标目录"
+                    db.insert_notification(title="复制完成", content=copy_dest_msg, type=NotificationType.SUCCESS.value)
+                    delete_on_complete = bool(config.get("qbittorrent.file_handling.copy_delete_on_complete", False))
+                    if delete_on_complete:
+                        client.delete_torrents(torrent_hash, delete_files=True)
+                        return 'completed'
+                    # 未配置复制后删种，则保留 qB 做种：是否进入 seeding 由做种分享率配置决定
+                    limit_ratio = float(config.get("qbittorrent.seeding.limit_ratio", -1.0))
+                    return 'seeding' if limit_ratio >= 0 else 'completed'
             except Exception as e:
                 logger.error(f"复制失败: {e}")
                 db.insert_notification(title="复制失败", content=str(e), type=NotificationType.ERROR.value)
@@ -522,13 +618,13 @@ class TaskMonitor:
 
         # 无 file_tasks：复制整个 content_path 到目标目录（保留根目录名）
         if not content_path or not os.path.exists(content_path):
-             logger.error(f"无法找到源文件路径: {content_path}")
-             db.insert_notification(title="复制失败", content=f"无法访问源文件路径: {content_path or '(空)'}", type=NotificationType.ERROR.value)
-             return None
+            logger.error(f"无法找到源文件路径: {content_path}")
+            db.insert_notification(title="复制失败", content=f"无法访问源文件路径: {content_path or '(空)'}", type=NotificationType.ERROR.value)
+            return None
         if not os.path.isabs(target_path):
-             final_dest_dir = os.path.join(default_target_path, target_path) if default_target_path else target_path
+            final_dest_dir = os.path.join(default_target_path, target_path) if default_target_path else target_path
         else:
-             final_dest_dir = target_path
+            final_dest_dir = target_path
         final_dest_dir = self._resolve_path_for_local(final_dest_dir, for_target=True)
         is_dir = os.path.isdir(content_path)
         basename = os.path.basename(content_path)
@@ -552,9 +648,13 @@ class TaskMonitor:
                 shutil.copy2(content_path, dest_path)
             logger.info(f"复制完成: {dest_path}")
             db.insert_notification(title="复制完成", content=f"任务 {task['id']} 已复制到 {dest_path}", type=NotificationType.SUCCESS.value)
-            if config.get("qbittorrent.file_handling.copy_delete_on_complete", False):
+            delete_on_complete = bool(config.get("qbittorrent.file_handling.copy_delete_on_complete", False))
+            if delete_on_complete:
                 client.delete_torrents(torrent_hash, delete_files=True)
                 return 'completed'
+            # 未配置复制后删种，则保留 qB 做种：是否进入 seeding 由做种分享率配置决定
+            limit_ratio = float(config.get("qbittorrent.seeding.limit_ratio", -1.0))
+            return 'seeding' if limit_ratio >= 0 else 'completed'
         except Exception as e:
             logger.error(f"复制失败: {e}")
             db.insert_notification(title="复制失败", content=str(e), type=NotificationType.ERROR.value)
@@ -593,13 +693,34 @@ class TaskMonitor:
 
         if current_ratio >= limit_ratio:
             if config.get("qbittorrent.seeding.delete_on_ratio_reached", False):
-                # 若文件已通过 qB 移动到目标路径，只从 qB 移除任务，不删文件，避免删到已归档的文件
+                # 是否由本程序复制完成归档（包括移动失败降级为复制，以及配置为直接复制的多文件场景）
+                copied_by_program = task_id in self._copy_completed_tasks
+
+                # 若不是复制归档场景，仍然要求 qB save_path 已到目标路径才允许删除，防止移动未完成时误删
                 task = db.get_download_task_by_id(task_id)
                 file_tasks = db.get_file_tasks(task_id) if task else []
                 qb_target = self._get_task_qb_target_path(task, file_tasks) if task else None
                 current_save = torrent_info.get('save_path', '')
                 at_target = qb_target and self._normalize_path_for_compare(current_save) == self._normalize_path_for_compare(qb_target)
-                delete_files = config.get("qbittorrent.seeding.delete_files", False) and not at_target
+
+                if qb_target and not at_target and not copied_by_program:
+                    # 普通“qB 自己移动”场景：移动尚未确认完成，先不删，只更新状态为 completed
+                    if task_id not in self._seeding_skip_warned:
+                        self._seeding_skip_warned.add(task_id)
+                        logger.warning(
+                            "任务 %s 分享率已达标，但尚未确认已移动到目标路径，暂不删除（save_path=%s expect=%s）",
+                            task_id, current_save, qb_target,
+                        )
+                        db.insert_notification(
+                            title="移动验证警告",
+                            content="分享率已达标但 qB 路径未确认更新，已暂缓删除，请稍后检查文件位置",
+                            type=NotificationType.WARNING.value,
+                        )
+                    db.update_task_status(task_id, 'completed')
+                    return
+
+                # 复制归档场景：文件已由本程序复制到归档目录，允许按配置删除 qB 任务及临时下载文件
+                delete_files = bool(config.get("qbittorrent.seeding.delete_files", False)) and not at_target
                 if at_target:
                     logger.info(f"任务 {task_id} 文件已在目标路径，删除任务时不删文件 (save_path={current_save})")
                 logger.info(f"任务 {task_id} 分享率达标，执行删除 (delete_files={delete_files})")
@@ -607,6 +728,9 @@ class TaskMonitor:
                     client.delete_torrents(torrent_hash, delete_files=delete_files)
                     db.update_task_status(task_id, 'completed')
                     db.insert_notification(title="做种完成", content=f"任务 {task_id} 分享率达标 ({current_ratio:.2f})，已删除任务", type=NotificationType.SUCCESS.value)
+                    # 删除成功后可清理标记
+                    if copied_by_program and task_id in self._copy_completed_tasks:
+                        self._copy_completed_tasks.discard(task_id)
                 except Exception as e:
                     logger.error(f"删除任务 {task_id} 失败: {e}")
             else:
@@ -772,59 +896,86 @@ class TaskMonitor:
         logger.info(f"任务 {task_id} 当前已在目标路径 (当前: {current_save_path}, 目标: {qb_move_path})，跳过移动")
         return False, local_mkdir_path, qb_move_path
 
-    def _verify_move(self, client, torrent_hash: str, local_path: str, qb_path: str, file_tasks: List[dict]):
-        """验证移动结果：轮询 qB save_path 是否更新，再检查本地文件是否存在"""
+    def _verify_move(self, client, torrent_hash: str, local_path: str, qb_path: str, file_tasks: List[dict]) -> bool:
+        """验证移动结果：轮询 qB save_path 是否更新，并检查本地文件是否存在。
+
+        说明：qB 的 setLocation 是异步操作，save_path 可能延迟很久才更新；但文件可能已实际移动完成。
+        因此验证以“目标目录文件出现”为优先成功条件，save_path 仅作辅助判断。
+        """
         logger.info(f"开始验证移动结果: {local_path}")
 
+        verify_timeout = int(config.get("qbittorrent.move_verify_timeout_seconds", 120) or 120)
+        poll_interval = float(config.get("qbittorrent.move_verify_poll_seconds", 2) or 2)
+        max_rounds = max(1, int(verify_timeout / max(poll_interval, 0.5)))
+
         qb_updated = False
-        for _ in range(10):
+        files_found = False
+        last_save_path = ""
+
+        for _ in range(max_rounds):
             try:
                 info = client.get_torrent_info(torrent_hash)
                 if not info:
                     break
                 current_save_path = info.get('save_path', '')
+                last_save_path = current_save_path
                 if self._normalize_path_for_compare(current_save_path) == self._normalize_path_for_compare(qb_path):
                     qb_updated = True
-                    break
             except Exception as e:
                 logger.warning(f"验证移动时获取种子信息失败: {e}")
-            time.sleep(2)
 
-        if not qb_updated:
-            logger.warning(f"移动验证超时: qB save_path 未更新 (expect: {qb_path})")
-            db.insert_notification(title="移动验证警告", content=f"qBittorrent 状态未及时更新，请稍后检查文件位置", type=NotificationType.WARNING.value)
-            return
-
-        files_found = False
-        try:
-            # 有 file_tasks 时检查重命名后的文件是否存在
-            if not os.path.exists(local_path):
-                logger.warning(f"移动验证失败: 本地目录不存在 {local_path}")
-            else:
-                if file_tasks:
-                    missing_files = []
-                    for ft in file_tasks:
-                        fname = ft.get('file_rename')
-                        if fname:
+            # 即使 qB 未及时更新 save_path，也检查文件是否已经出现在目标目录
+            try:
+                if os.path.exists(local_path):
+                    if file_tasks:
+                        expected = [ft for ft in file_tasks if (ft.get('file_rename') or '').strip()]
+                        missing = []
+                        for ft in expected:
+                            fname = (ft.get('file_rename') or '').strip()
                             fpath = os.path.join(local_path, fname)
                             if not os.path.exists(fpath):
-                                missing_files.append(fname)
-                    if missing_files:
-                        logger.warning(f"移动验证: 部分文件未找到 {missing_files}")
-                        if len(missing_files) < len(file_tasks):
+                                missing.append(fname)
+                        if not missing:
+                            files_found = True
+                        elif len(missing) < len(expected):
                             files_found = True
                     else:
                         files_found = True
-                else:
-                    files_found = True
-        except Exception as e:
-            logger.error(f"移动验证异常: {e}")
+            except Exception as e:
+                logger.warning(f"移动验证检查本地文件异常: {e}")
+
+            if qb_updated or files_found:
+                break
+
+            time.sleep(poll_interval)
 
         if files_found:
-            logger.info("移动验证成功: 文件已存在")
-            db.insert_notification(title="移动完成", content=f"文件已成功移动到: {local_path}", type=NotificationType.SUCCESS.value)
-        else:
-            db.insert_notification(title="移动验证失败", content=f"目录已创建但文件未找到: {local_path}", type=NotificationType.WARNING.value)
+            if qb_updated:
+                logger.info("移动验证成功: 文件已存在且 qB save_path 已更新")
+                db.insert_notification(title="移动完成", content=f"文件已成功移动到: {local_path}", type=NotificationType.SUCCESS.value)
+            else:
+                logger.warning(
+                    "移动验证成功但 qB save_path 未及时更新 (save_path=%s expect=%s)",
+                    last_save_path, qb_path,
+                )
+                db.insert_notification(
+                    title="移动完成（状态延迟）",
+                    content=f"文件已移动到: {local_path}（qB 状态可能延迟更新）",
+                    type=NotificationType.SUCCESS.value,
+                )
+            return True
+
+        if not qb_updated:
+            logger.warning(f"移动验证超时: 未确认文件已到目标且 qB save_path 未更新 (expect: {qb_path})")
+            db.insert_notification(
+                title="移动验证警告",
+                content="qBittorrent 状态未及时更新，且未在目标目录确认到文件，请稍后检查文件位置",
+                type=NotificationType.WARNING.value,
+            )
+            return False
+
+        db.insert_notification(title="移动验证失败", content=f"qB 路径已更新但未在目标目录找到文件: {local_path}", type=NotificationType.WARNING.value)
+        return False
 
 
 task_monitor = TaskMonitor()
