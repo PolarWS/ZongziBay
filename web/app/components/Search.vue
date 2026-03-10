@@ -10,6 +10,7 @@ const containerRef = ref<HTMLElement | null>(null)
 const router = useRouter()
 
 const suggestions = ref<string[]>([])
+const placeholderText = computed(() => (props.type === 'movie' ? '搜索电影...' : '搜索剧集...'))
 
 onClickOutside(containerRef, () => {
   isFocused.value = false
@@ -68,7 +69,7 @@ const submit = () => {
       <Input 
         id="input-26" 
         class="peer pe-12 ps-10 h-14 text-lg shadow-sm border-2 border-border/60 hover:border-primary/50 focus-visible:border-primary focus-visible:ring-0 transition-colors bg-background/80 backdrop-blur-sm rounded-xl" 
-        placeholder="搜索电影或剧集..." 
+        :placeholder="placeholderText"
         type="search" 
         v-model="searchQuery" 
         @focus="isFocused = true" 

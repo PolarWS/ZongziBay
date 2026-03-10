@@ -54,36 +54,36 @@ onMounted(() => {
             
             <div class="flex flex-col items-center gap-5 md:gap-8 mt-6 md:mt-12 w-full">
                 <!-- 类型切换：电影 / 剧集 -->
-                <div class="flex flex-wrap gap-3 md:gap-4">
+                <div class="flex flex-wrap gap-2 md:gap-4">
                     <Button 
                         size="lg" 
                         :variant="type === 'movie' ? 'default' : 'outline'"
                         @click="onChangeType('movie')"
-                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 inline-flex items-center gap-2"
+                        class="min-w-[44px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 inline-flex items-center gap-1 md:gap-2 justify-center"
                         :class="type === 'movie' ? 'hover:brightness-110 hover:shadow-lg hover:scale-105' : 'hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105'"
                     >
                         <Film class="h-4 w-4" />
-                        电影
+                        <span class="hidden sm:inline">电影</span>
                     </Button>
                     <Button 
                         size="lg" 
                         :variant="type === 'tv' ? 'default' : 'outline'"
                         @click="onChangeType('tv')"
-                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 inline-flex items-center gap-2"
+                        class="min-w-[44px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 inline-flex items-center gap-1 md:gap-2 justify-center"
                         :class="type === 'tv' ? 'hover:brightness-110 hover:shadow-lg hover:scale-105' : 'hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105'"
                     >
                         <Tv class="h-4 w-4" />
-                        剧集
+                        <span class="hidden sm:inline">剧集</span>
                     </Button>
                     <Button 
                         size="lg" 
                         variant="outline"
                         as-child
-                        class="min-w-[100px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105"
+                        class="min-w-[44px] md:min-w-[120px] text-base md:text-lg h-10 md:h-12 transition-all duration-300 hover:bg-primary/20 hover:text-primary hover:border-primary hover:shadow-md hover:scale-105 justify-center"
                     >
-                        <NuxtLink to="/recommend" class="inline-flex items-center gap-2">
+                        <NuxtLink to="/recommend" class="inline-flex items-center gap-1 md:gap-2">
                             <Sparkles class="h-4 w-4" />
-                            推荐
+                            <span class="hidden sm:inline">推荐</span>
                         </NuxtLink>
                     </Button>
                 </div>

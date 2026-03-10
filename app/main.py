@@ -24,8 +24,11 @@ mimetypes.add_type("text/css", ".css")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
+
+# 只屏蔽 Uvicorn 的 HTTP 访问日志，保留应用自身的 INFO 日志
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 
 # 获取项目根目录 (app/main.py -> app/ -> root)
