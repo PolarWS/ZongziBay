@@ -33,12 +33,18 @@ class MagnetService:
     """磁链解析与 qBittorrent 下载服务"""
 
     def __init__(self):
-        qb_config = config.get("qbittorrent", {})
+        self.client = None
+        self.reload_config()
+
+    def reload_config(self) -> None:
+        """从当前运行时配置刷新 qBittorrent 连接信息与 trackers（设置页保存后可立即生效）。"""
+        qb_config = config.get("qbittorrent", {}) or {}
         self.host = qb_config.get("host", "http://localhost:8080")
         self.username = qb_config.get("username", "admin")
         self.password = qb_config.get("password", "adminadmin")
+        self.trackers = config.get("trackers", []) or []
+        # 连接参数变更后重建 client/session，避免沿用旧 host 的 session
         self.client = None
-        self.trackers: List[str] = config.get("trackers", [])
 
     def _append_trackers(self, magnet_link: str) -> str:
         """在磁力链接后追加配置的 tracker 列表"""

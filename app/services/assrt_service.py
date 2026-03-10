@@ -178,6 +178,10 @@ class AssrtService:
     """ASSRT API 服务"""
 
     def __init__(self):
+        self.reload_config()
+
+    def reload_config(self) -> None:
+        """从当前运行时配置刷新 token/base_url。"""
         self._token = (config.get("subtitle.assrt.token") or "").strip()
         base = (config.get("subtitle.assrt.base_url") or "https://api.assrt.net").strip()
         self._base_url = base.rstrip("/") if base else "https://api.assrt.net"

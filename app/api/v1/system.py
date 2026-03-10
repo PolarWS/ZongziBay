@@ -4,6 +4,10 @@ from fastapi import APIRouter, Body, HTTPException
 
 from app.core.config import config
 from app.schemas.base import BaseResponse
+from app.services.assrt_service import assrt_service
+from app.services.magnet_service import magnet_service
+from app.services.task_service import task_service
+from app.services.tmdb_service import tmdb_service
 
 router = APIRouter()
 
@@ -22,6 +26,11 @@ async def save_config(body: Dict[str, Any] = Body(..., embed=False)):
         raise HTTPException(status_code=400, detail="请求体须为配置对象")
     try:
         config.save_file_config(body)
+        # 部分服务启动时会缓存配置，这里主动刷新，确保“保存后立即生效”
+        tmdb_service.reload_config()
+        assrt_service.reload_config()
+        magnet_service.reload_config()
+        task_service.reload_config()
         return BaseResponse.success(message="配置已保存")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

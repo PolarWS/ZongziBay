@@ -1,5 +1,10 @@
 <script setup lang="ts">
+import { assrtQuota } from '@/api/assrt'
+import { animeGardenTeams } from '@/api/animeGarden'
+import { checkConnectionApiV1MagnetCheckGet } from '@/api/magnet'
+import { searchTorrentsApiV1PiratebaySearchGet } from '@/api/pirateBay'
 import { getConfigApiV1SystemConfigGet, saveConfigApiV1SystemConfigPut } from '@/api/system'
+import { getTrendingMoviesApiV1TmdbTrendingMovieGet } from '@/api/tmdb'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
@@ -19,6 +24,14 @@ type DefaultType = 'movie' | 'tv'
 const originalConfig = ref<Record<string, any>>({})
 const loadingConfig = ref(false)
 const savingConfig = ref(false)
+const testing = reactive({
+  tmdb: false,
+  piratebay: false,
+  animeGarden: false,
+  assrt: false,
+  qb: false,
+  all: false,
+})
 
 const securityUsername = ref('')
 const securityPassword = ref('')
@@ -230,6 +243,101 @@ const saveConfig = async () => {
   }
 }
 
+const testTmdb = async () => {
+  testing.tmdb = true
+  try {
+    const res = await getTrendingMoviesApiV1TmdbTrendingMovieGet({ page: 1, window: 'week' })
+    const data = (res as any)?.data
+    const items = data?.results || data?.items || data?.data?.results || []
+    toast.success(`TMDB 连接正常${Array.isArray(items) ? `（返回 ${items.length} 条）` : ''}`)
+  } catch (e: any) {
+    toast.error(e?.message || 'TMDB 连接失败')
+  } finally {
+    testing.tmdb = false
+  }
+}
+
+const testPirateBay = async () => {
+  testing.piratebay = true
+  try {
+    const res = await searchTorrentsApiV1PiratebaySearchGet({ q: 'test' })
+    const data = (res as any)?.data
+    const list = data?.data ?? data ?? []
+    toast.success(`海盗湾连接正常${Array.isArray(list) ? `（返回 ${list.length} 条）` : ''}`)
+  } catch (e: any) {
+    toast.error(e?.message || '海盗湾连接失败')
+  } finally {
+    testing.piratebay = false
+  }
+}
+
+const testAnimeGarden = async () => {
+  testing.animeGarden = true
+  try {
+    const res = await animeGardenTeams()
+    const data = (res as any)?.data
+    const list = data?.data ?? data ?? []
+    toast.success(`动漫花园连接正常${Array.isArray(list) ? `（返回 ${list.length} 条字幕组）` : ''}`)
+  } catch (e: any) {
+    toast.error(e?.message || '动漫花园连接失败')
+  } finally {
+    testing.animeGarden = false
+  }
+}
+
+const testAssrt = async () => {
+  testing.assrt = true
+  try {
+    const res = await assrtQuota()
+    const data = (res as any)?.data
+    const quota = data?.data?.quota ?? data?.quota
+    toast.success(`ASSRT 连接正常${quota != null ? `（配额 ${quota}）` : ''}`)
+  } catch (e: any) {
+    toast.error(e?.message || 'ASSRT 连接失败')
+  } finally {
+    testing.assrt = false
+  }
+}
+
+const testQb = async () => {
+  testing.qb = true
+  try {
+    const res = await checkConnectionApiV1MagnetCheckGet()
+    const data = (res as any)?.data
+    const ok = data?.data ?? data
+    if (ok) toast.success('qBittorrent 连接正常')
+    else toast.error('qBittorrent 连接失败（请检查 host/账号密码/网络）')
+  } catch (e: any) {
+    toast.error(e?.message || 'qBittorrent 连接失败')
+  } finally {
+    testing.qb = false
+  }
+}
+
+const testAllConnections = async () => {
+  if (testing.all) return
+  testing.all = true
+  try {
+    await testTmdb()
+    await testPirateBay()
+    await testAnimeGarden()
+    await testAssrt()
+    await testQb()
+  } finally {
+    testing.all = false
+  }
+}
+
+const onKeydownSaveConfig = (e: KeyboardEvent) => {
+  // 尽力拦截 Ctrl+S / Cmd+S 保存配置（部分浏览器/系统可能仍会抢占）
+  const key = (e.key || '').toLowerCase()
+  if ((e.ctrlKey || e.metaKey) && key === 's') {
+    e.preventDefault()
+    if (savingConfig.value || loadingConfig.value) return
+    saveConfig()
+  }
+}
+
 // --- 偏好（localStorage）---
 const theme = ref<Theme>('system')
 const defaultSearchSource = ref<SearchSource>('piratebay')
@@ -279,6 +387,11 @@ onMounted(() => {
   if (d && (d === 'movie' || d === 'tv')) defaultType.value = d
 
   loadConfig()
+
+  // 快捷键：Ctrl+S / Cmd+S 保存配置
+  if (typeof window !== 'undefined') {
+    window.addEventListener('keydown', onKeydownSaveConfig, { capture: true })
+  }
 })
 
 let systemThemeMedia: MediaQueryList | null = null
@@ -292,6 +405,9 @@ onMounted(() => {
 })
 onUnmounted(() => {
   if (systemThemeMedia) systemThemeMedia.removeEventListener('change', systemThemeHandler)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('keydown', onKeydownSaveConfig, { capture: true } as any)
+  }
 })
 </script>
 
@@ -386,13 +502,34 @@ onUnmounted(() => {
         <FileJson class="h-5 w-5" />
         <h2 class="text-lg font-medium text-foreground">系统配置</h2>
       </div>
-      <p class="text-sm text-muted-foreground pl-8">
-        这里按字段编辑服务端 config，修改后点击保存将写回配置文件并立即生效。
-      </p>
       <div class="space-y-8 pl-8">
-        <div class="flex gap-2">
-          <Button size="sm" variant="outline" :disabled="loadingConfig" @click="loadConfig">
-            {{ loadingConfig ? '加载中…' : '重新加载' }}
+        <p class="text-xs text-muted-foreground">
+          说明：以上按钮仅用于测试连通性/鉴权是否正常，不会保存配置，也不会创建下载任务或写入数据。
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            class="min-w-24"
+            :disabled="testing.all || loadingConfig"
+            @click="testAllConnections"
+          >
+            {{ testing.all ? '测试中…' : '测试全部' }}
+          </Button>
+          <Button size="sm" variant="secondary" :disabled="testing.tmdb" @click="testTmdb">
+            {{ testing.tmdb ? 'TMDB…' : 'TMDB' }}
+          </Button>
+          <Button size="sm" variant="secondary" :disabled="testing.piratebay" @click="testPirateBay">
+            {{ testing.piratebay ? '海盗湾…' : '海盗湾' }}
+          </Button>
+          <Button size="sm" variant="secondary" :disabled="testing.animeGarden" @click="testAnimeGarden">
+            {{ testing.animeGarden ? '动漫花园…' : '动漫花园' }}
+          </Button>
+          <Button size="sm" variant="secondary" :disabled="testing.assrt" @click="testAssrt">
+            {{ testing.assrt ? 'ASSRT…' : 'ASSRT' }}
+          </Button>
+          <Button size="sm" variant="secondary" :disabled="testing.qb" @click="testQb">
+            {{ testing.qb ? 'qB…' : 'qBittorrent' }}
           </Button>
         </div>
 
@@ -757,8 +894,11 @@ onUnmounted(() => {
         </div>
 
         <!-- 保存按钮（放在最下方） -->
-        <div class="pt-4">
-          <Button size="sm" :disabled="savingConfig || loadingConfig" @click="saveConfig">
+        <div class="pt-4 flex justify-center gap-2">
+          <Button size="sm" variant="outline" class="min-w-24" :disabled="loadingConfig" @click="loadConfig">
+            {{ loadingConfig ? '加载中…' : '重新加载' }}
+          </Button>
+          <Button size="sm" class="min-w-24 border border-transparent" :disabled="savingConfig || loadingConfig" @click="saveConfig">
             {{ savingConfig ? '保存中…' : '保存配置' }}
           </Button>
         </div>
