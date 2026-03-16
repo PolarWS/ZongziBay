@@ -745,7 +745,8 @@ onUnmounted(() => {
             <h3 class="text-sm font-medium text-foreground">路径与数据库</h3>
           </div>
           <p class="text-xs text-muted-foreground">
-            下载 / 归档根路径及各分类的具体目录；注意与实际挂载路径、NAS 路径保持一致，避免文件找不到。
+            下载 / 归档根路径及各分类的具体目录，注意与实际挂载路径、NAS 路径保持一致，避免文件找不到。
+            根路径是用于qBittorrent挂在目前前面补全，比如你qBittorrent挂载了/video但是本项目挂载了D:/docker/video那么就填D:/docker，如果一致就不用填留空
           </p>
           <div class="grid gap-3 sm:grid-cols-2">
             <div class="space-y-1 sm:col-span-2">
