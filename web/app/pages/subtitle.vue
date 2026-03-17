@@ -80,6 +80,18 @@ function goToMagnet(it: API.AssrtSubItem) {
         <Button type="submit" class="h-9">搜索</Button>
       </form>
       <p v-if="q" class="text-sm text-muted-foreground">当前搜索：{{ q }}</p>
+      <p class="text-xs text-muted-foreground">
+        字幕服务由
+        <a
+          href="https://assrt.net"
+          target="_blank"
+          rel="noreferrer"
+          class="underline-offset-2 hover:underline"
+        >
+          assrt.net
+        </a>
+        提供
+      </p>
     </div>
     <AppLoadingOverlay v-if="loading" />
     <div v-else-if="items.length > 0" class="rounded-md border border-border bg-card shadow-sm">
