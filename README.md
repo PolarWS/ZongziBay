@@ -1,10 +1,25 @@
-# ZongziBay（粽子湾）
+<h1 align="center">ZongziBay（粽子湾）</h1>
 
-> 自托管的媒体下载与管理工具：搜索种子、qBittorrent 下载、TMDB 元数据、字幕与智能重命名，一个 Web 界面搞定。
+<p align="center">
+  <img src="/docs/image/ZongziBay_home.png" alt="Web 设置页示意">
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+<p align="center">
+  自托管的媒体下载与管理工具<br>
+  搜索种子、qBittorrent 下载、TMDB 元数据、字幕与智能重命名，一个 Web 界面搞定。
+</p>
 
----
+<p align="center">
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT">
+  </a>
+  <a href="https://hub.docker.com/r/polarws/zongzibay">
+    <img src="https://img.shields.io/docker/pulls/polarws/zongzibay.svg" alt="Docker Pulls">
+  </a>
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/Nuxt-3-00DC82.svg?logo=nuxtdotjs&logoColor=white" alt="Nuxt 3">
+  <img src="https://img.shields.io/badge/qBittorrent-API%20Integration-2E9FFF.svg?logo=qbittorrent&logoColor=white" alt="qBittorrent Integration">
+</p>
 
 ## 功能
 
@@ -19,81 +34,17 @@
 
 ## 技术栈
 
-- **后端**: Python 3.12+ / FastAPI / SQLite  
+- **后端**: Python / FastAPI / SQLite  
 - **前端**: Nuxt 3 / Vue 3 / Tailwind / shadcn-nuxt  
 - **下载**: qBittorrent Web API  
 
 ---
 
-## 前置要求
+## 使用与安装文档
 
-- 已安装并运行 [qBittorrent](https://www.qbittorrent.org/)
-- [TMDB](https://www.themoviedb.org/) API Key（用于封面与元数据）
-- [Assrt](https://assrt.net/) Token（用于字幕搜索）
+#### 推荐阅读：《[ZongziBay 项目使用教程](/docs/usage_guide.md)》
 
----
-
-## 快速开始
-
-### Docker（推荐）
-
-```bash
-# 构建镜像
-docker build -t zongzibay .
-
-# 创建配置目录并启动
-mkdir -p config
-docker run -d \
-  --name zongzibay \
-  -p 8000:8000 \
-  -v $(pwd)/config:/app/config \
-  zongzibay
-```
-
-首次运行会在 `config` 目录下自动生成 `config.yml` 和 `ZongziBay.db`。浏览器访问 `http://localhost:8000`。
-
-### 本地运行
-
-**1. 后端**
-
-```bash
-pip install -r requirements.txt
-python -m app.main
-```
-
-服务地址：`http://localhost:8000`，API 文档：`http://localhost:8000/docs`。
-
-**2. 前端**
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-前端开发服务器：`http://localhost:3001`，会代理请求到后端。
-
-**3. 环境变量（可选）**
-
-- `APP_ENV=prod` — 加载 `config-prod.yml` 覆盖默认配置  
-- `ZONGZI_*` — 按需覆盖配置项，例如：`ZONGZI_SECURITY_USERNAME=admin`  
-
----
-
-## 配置
-
-主配置为根目录或 Docker 内 `/app/config` 下的 `config.yml`。首次启动会根据 `config_default.yml` 自动补全缺失项。
-
-| 配置项 | 说明 |
-|--------|------|
-| **security** | 登录账号、密码、JWT `secret_key`。生产环境请务必修改 `secret_key`。 |
-| **qbittorrent** | WebUI 地址与账号；文件处理（复制/移动）、做种分享率与达标后是否删除。 |
-| **tmdb** | API Key、语言（封面与元数据）。 |
-| **paths** | 下载路径与归档目标路径（电影/剧集/动漫等）。 |
-| **trackers** | 添加任务时自动追加的 BT Tracker 列表。 |
-| **subtitle.assrt** | Assrt 字幕 API 的 token 与 base_url。 |
-
-可在 Web 设置页中直接编辑并保存 `config.yml`；环境变量 `ZONGZI_*` 的覆盖仍然生效。
+上述文档会从「准备工作 → Docker 部署 → Web 设置页配置」一步步带你跑通。
 
 ---
 
@@ -103,7 +54,7 @@ npm run dev
 python -m pytest tests/ -v
 ```
 
-测试使用临时数据库，不影响本地数据。更多说明见 [tests/README_TESTS.md](tests/README_TESTS.md)。
+测试使用临时数据库，不影响本地数据。更多说明见 《[测试说明](/docs/readme_test.md)》
 
 ---
 

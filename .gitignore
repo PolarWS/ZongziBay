@@ -6,7 +6,7 @@ Thumbs.db
 .vscode/
 *.log
 
-docs/
+docs/development.md
 test_download/
 .pytest_cache/
 
