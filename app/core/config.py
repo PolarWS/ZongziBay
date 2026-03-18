@@ -8,6 +8,10 @@ from typing import Any, Dict
 logger = logging.getLogger(__name__)
 
 
+# SQLite 文件名固定，与 config.yml 同目录；不写进 YAML
+DATABASE_SQLITE_FILENAME = "ZongziBay.db"
+
+
 def _deep_merge_default(default: Dict, user: Dict) -> Dict:
     """
     以默认配置为基底，用用户配置覆盖；用户没有的键从默认补全。
@@ -53,9 +57,10 @@ class Config:
 
     def _load_default_config(self) -> Dict[str, Any]:
         """
-        加载内置默认模板 config_default.yml（用于完整性检测与补全），避免用户修改污染默认值。
+        加载内置默认模板 app/resources/config_default.yml（用于完整性检测与补全），避免用户修改污染默认值。
         """
-        default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config_default.yml")
+        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        default_path = os.path.join(app_dir, "resources", "config_default.yml")
         if not os.path.exists(default_path):
             logger.warning(f"默认配置文件未找到: {default_path}")
             return {}
@@ -110,20 +115,33 @@ class Config:
     def _load_config(self):
         """
         加载配置文件
-        1. 加载默认 config_default.yml，与用户 config 做完整性合并（缺项补全）
+        1. 加载默认 app/resources/config_default.yml，与用户 config 做完整性合并（缺项补全）
         2. 若有缺项或文件不存在，写回合并后的 config，保证结构完整
-        3. 若存在 APP_ENV，加载 config-{env}.yml 覆盖
+        3. 若存在 APP_ENV，则优先使用 config/config-{env}.yml 或 config-{env}.yml 作为主配置文件
         4. 从环境变量覆盖（支持 Docker 注入）
         """
         current_file = os.path.abspath(__file__)
         root_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
 
         default_config = self._load_default_config()
+
+        # 基础配置文件（无环境变量时）
         docker_config_path = os.path.join(root_dir, "config", "config.yml")
         root_config_path = os.path.join(root_dir, "config.yml")
         target_config_path = root_config_path
         if os.path.exists(docker_config_path):
             target_config_path = docker_config_path
+
+        # 根据 APP_ENV 选择环境专用配置文件作为最终读写对象
+        env = os.getenv("APP_ENV")
+        if env:
+            env_filename = f"config-{env}.yml"
+            docker_env_path = os.path.join(root_dir, "config", env_filename)
+            root_env_path = os.path.join(root_dir, env_filename)
+            if os.path.exists(docker_env_path):
+                target_config_path = docker_env_path
+            elif os.path.exists(root_env_path):
+                target_config_path = root_env_path
 
         self._config_path = target_config_path
         user_config: Dict[str, Any] = {}
@@ -154,21 +172,7 @@ class Config:
             except Exception as e:
                 logger.error(f"写入配置文件失败: {e}")
 
-        env = os.getenv("APP_ENV")
-        if env:
-            env_config_filename = f"config-{env}.yml"
-            env_config_path = os.path.join(root_dir, env_config_filename)
-            if os.path.exists(env_config_path):
-                try:
-                    with open(env_config_path, "r", encoding="utf-8") as f:
-                        env_config = yaml.safe_load(f) or {}
-                        logger.info(f"已加载环境配置: {env_config_path} (环境: {env})")
-                        self._deep_update(base_config, env_config)
-                except Exception as e:
-                    logger.error(f"加载环境配置失败: {e}")
-            else:
-                logger.warning(f"警告: 环境配置文件未找到: {env_config_path}")
-
+        base_config.pop("database", None)
         self._file_config = copy.deepcopy(base_config)
         self._override_from_env(base_config)
         self._config = base_config
@@ -186,13 +190,31 @@ class Config:
                 return default
         return value if value is not None else default
 
+    def get_database_file_path(self) -> str:
+        """
+        SQLite 绝对路径：与当前加载的 config.yml 同目录 + DATABASE_SQLITE_FILENAME。
+        Docker 常见为 config/config.yml → config/ZongziBay.db。
+        """
+        name = DATABASE_SQLITE_FILENAME
+        cfg_path = os.path.abspath(self._config_path)
+        cfg_dir = os.path.dirname(cfg_path)
+        if not cfg_dir:
+            cfg_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if os.path.isabs(name):
+            return name
+        return os.path.join(cfg_dir, name)
+
     def get_file_config(self) -> Dict[str, Any]:
         """返回当前文件中的配置（未叠加环境变量），供设置页展示与编辑"""
-        return copy.deepcopy(self._file_config)
+        out = copy.deepcopy(self._file_config)
+        out.pop("database", None)
+        return out
 
     def save_file_config(self, new_config: Dict[str, Any]) -> None:
         """将配置写入文件并重新加载（设置页保存时调用）；new_config 为完整配置对象"""
-        self._file_config = copy.deepcopy(new_config)
+        new_config = copy.deepcopy(new_config)
+        new_config.pop("database", None)
+        self._file_config = new_config
         try:
             with open(self._config_path, "w", encoding="utf-8") as f:
                 yaml.dump(self._file_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)

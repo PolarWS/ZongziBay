@@ -20,10 +20,9 @@ class Database:
     """
 
     def __init__(self):
-        db_cfg = config.get("database", {})
-        path_cfg = db_cfg.get("path", "Zongzibay.db")
+        # 与当前 config.yml 同目录（如 Docker 下 config/ZongziBay.db），不在设置页可改
+        self.db_path = config.get_database_file_path()
         root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.db_path = path_cfg if os.path.isabs(path_cfg) else os.path.join(root_dir, path_cfg)
         self.schema_path = os.path.join(root_dir, "sql", "main.sql")
         if not os.path.exists(self.schema_path):
             self.schema_path = os.path.join(root_dir, "sql", "create_table.sql")
