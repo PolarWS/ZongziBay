@@ -60,8 +60,6 @@ const animeGardenPageSize = ref<number | null>(null)
 const assrtToken = ref('')
 const assrtBaseUrl = ref('')
 
-const dbPath = ref('')
-
 const pathsDownloadRootPath = ref('')
 const pathsTargetRootPath = ref('')
 const pathsRootPath = ref('')
@@ -119,9 +117,6 @@ const applyConfigToForm = (cfg: Record<string, any>) => {
   const assrt = subtitle.assrt || {}
   assrtToken.value = assrt.token ?? ''
   assrtBaseUrl.value = assrt.base_url ?? ''
-
-  const database = cfg.database || {}
-  dbPath.value = database.path ?? ''
 
   const pathsCfg = cfg.paths || {}
   pathsDownloadRootPath.value = pathsCfg.download_root_path ?? ''
@@ -206,8 +201,7 @@ const saveConfig = async () => {
   cfg.subtitle.assrt.token = assrtToken.value
   cfg.subtitle.assrt.base_url = assrtBaseUrl.value
 
-  cfg.database = cfg.database || {}
-  cfg.database.path = dbPath.value
+  delete cfg.database
 
   cfg.paths = cfg.paths || {}
   cfg.paths.download_root_path = pathsDownloadRootPath.value
@@ -734,6 +728,10 @@ onUnmounted(() => {
                 v-model="assrtBaseUrl"
                 class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
+              <p class="text-xs text-muted-foreground">
+                若默认地址访问失败可更换为
+                <code class="rounded bg-muted px-1 py-0.5 text-[11px]">https://api.makedie.me</code>
+              </p>
             </div>
           </div>
         </div>
@@ -748,14 +746,16 @@ onUnmounted(() => {
             下载 / 归档根路径及各分类的具体目录，注意与实际挂载路径、NAS 路径保持一致，避免文件找不到。
             根路径是用于qBittorrent挂在目前前面补全，比如你qBittorrent挂载了/video但是本项目挂载了D:/docker/video那么就填D:/docker，如果一致就不用填留空
           </p>
+          <p class="text-xs text-muted-foreground">
+            数据库固定为当前
+            <code class="rounded bg-muted px-1 py-0.5 text-[11px]">config.yml</code>
+            同目录下的
+            <code class="rounded bg-muted px-1 py-0.5 text-[11px]">ZongziBay.db</code>
+            （如 Docker 下
+            <code class="rounded bg-muted px-1 py-0.5 text-[11px]">config/ZongziBay.db</code>
+            ），不在此配置。
+          </p>
           <div class="grid gap-3 sm:grid-cols-2">
-            <div class="space-y-1 sm:col-span-2">
-              <Label>数据库路径</Label>
-              <input
-                v-model="dbPath"
-                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
             <div class="space-y-1 sm:col-span-2">
               <Label>下载根路径（download_root_path）</Label>
               <input
