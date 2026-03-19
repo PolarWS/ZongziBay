@@ -43,6 +43,7 @@
 ## 使用与安装文档
 
 #### 推荐阅读：《[ZongziBay 项目使用教程](/docs/usage_guide.md)》
+#### 飞牛OS图片安装指南：《[飞牛OS (FNOS) 部署 ZongziBay 全攻略](https://blog.polarws.moe/articlePage/21)》
 
 上述文档会从「准备工作 → Docker 部署 → Web 设置页配置」一步步带你跑通。
 
