@@ -64,11 +64,11 @@ python -m pytest tests/ -v
 ├── app/                 # FastAPI 后端
 │   ├── api/v1/          # API 路由
 │   ├── core/            # 配置、数据库、qB 客户端、鉴权
+│   ├── resources/       # 内置资源
 │   ├── schemas/         # 请求/响应模型
 │   └── services/        # 任务、监控、磁力、字幕等业务逻辑
 ├── web/                 # Nuxt 3 前端
 ├── tests/               # pytest 测试
-├── config_default.yml   # 默认配置模板（自动合并到 config.yml）
 └── requirements.txt
 ```
 
