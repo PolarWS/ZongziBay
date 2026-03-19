@@ -84,7 +84,7 @@ const trackersText = ref('')
 const applyConfigToForm = (cfg: Record<string, any>) => {
   const security = cfg.security || {}
   securityUsername.value = security.username ?? ''
-  securityPassword.value = security.password ?? ''
+  securityPassword.value = ''
   securitySecretKey.value = security.secret_key ?? ''
   securityAlgorithm.value = security.algorithm ?? ''
   securityAccessTokenExpireMinutes.value = security.access_token_expire_minutes ?? null

@@ -3,6 +3,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Body, HTTPException
 
 from app.core.config import config
+from app.core.password_hash import hash_password
 from app.schemas.base import BaseResponse
 from app.services.assrt_service import assrt_service
 from app.services.magnet_service import magnet_service
@@ -16,6 +17,9 @@ router = APIRouter()
 async def get_config():
     """返回当前配置文件内容（未叠加环境变量），用于设置页展示与修改"""
     data = config.get_file_config()
+    # 避免把登录密码（哈希或明文）直接下发到前端
+    if isinstance(data.get("security"), dict) and "password" in data["security"]:
+        data["security"]["password"] = ""
     return BaseResponse.success(data=data)
 
 
@@ -25,6 +29,16 @@ async def save_config(body: Dict[str, Any] = Body(..., embed=False)):
     if not body or not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="请求体须为配置对象")
     try:
+        # security.password：允许前端传明文用于改密；若为空字符串则保留原值
+        if isinstance(body.get("security"), dict) and "password" in body["security"]:
+            pwd = body["security"].get("password")
+            if pwd == "" or pwd is None:
+                old = config.get_file_config()
+                if isinstance(old.get("security"), dict) and "password" in old["security"]:
+                    body["security"]["password"] = old["security"]["password"]
+            elif isinstance(pwd, str) and not pwd.startswith("pbkdf2_sha256$"):
+                body["security"]["password"] = hash_password(pwd)
+
         config.save_file_config(body)
         # 部分服务启动时会缓存配置，这里主动刷新，确保“保存后立即生效”
         tmdb_service.reload_config()
