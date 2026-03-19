@@ -49,9 +49,10 @@ env/
 *.sqlite3
 ZongziBay.db
 
-# Configuration
-config-prod.yml
+# Configuration (ignore all root-level config*.yml)
+/config*.yml
 
 # Docker & Build Artifacts
 publish.ps1
 zongzibay_*.tar
+ZongziBay_*.tar
