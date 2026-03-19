@@ -5,8 +5,8 @@
 # ZONGZI_SECURITY_PASSWORD=你的登录密码
 # ZONGZI_SECURITY_SECRET_KEY=你的JWT密钥
 security:
-  username: admin                      # 系统登录用户名
-  password: password123                # 系统登录密码
+  username: "admin"                     # 系统登录用户名
+  password: "pbkdf2_sha256$310000$HkQaih_x0pBSrhLe_zMPDA$DD1BryYutGV89bAm6TPjIlcymCNhGjDhR2S0BdzrVxs" # 系统登录密码（默认明文 password123，此处存 PBKDF2 哈希）
   secret_key: "CHANGE_THIS_SECRET_KEY" # JWT 签名密钥，生产环境请务必修改此值以保证安全
   algorithm: "HS256"                   # JWT 加密算法
   access_token_expire_minutes: 1440      # Token 过期时间（分钟）

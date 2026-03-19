@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.config import config
+from app.core.password_hash import verify_password
 from app.core.security import (
     create_access_token,
     get_access_token_expire_minutes,
@@ -20,7 +21,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     """用户登录并获取 Access Token"""
     conf_username = config.get("security.username")
     conf_password = config.get("security.password")
-    if form_data.username != conf_username or form_data.password != conf_password:
+    if form_data.username != conf_username or not verify_password(form_data.password, conf_password or ""):
         raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="用户名或密码错误")
 
     access_token_expires = timedelta(minutes=get_access_token_expire_minutes())
