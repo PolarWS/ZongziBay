@@ -5,6 +5,8 @@ import os
 import yaml
 from typing import Any, Dict
 
+from app.core.password_hash import hash_password, is_password_hash
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,6 +56,26 @@ class Config:
             else:
                 base_dict[key] = value
         return base_dict
+
+    def _upgrade_security_password_if_needed(self, cfg: Dict[str, Any]) -> bool:
+        """
+        若 security.password 为明文，则自动升级为 PBKDF2 哈希。
+        返回是否发生了升级。
+        """
+        if not isinstance(cfg, dict):
+            return False
+        security = cfg.get("security")
+        if not isinstance(security, dict):
+            return False
+        password = security.get("password")
+        if not isinstance(password, str) or not password.strip():
+            return False
+        if is_password_hash(password):
+            return False
+
+        security["password"] = hash_password(password)
+        logger.info("检测到明文 security.password，已自动升级为 PBKDF2 哈希")
+        return True
 
     def _load_default_config(self) -> Dict[str, Any]:
         """
@@ -160,13 +182,16 @@ class Config:
         default_keys = self._all_keys_set(default_config)
         user_keys = self._all_keys_set(user_config)
         missing = default_keys - user_keys
-        if missing or not os.path.exists(target_config_path):
+        password_upgraded = self._upgrade_security_password_if_needed(base_config)
+        if missing or not os.path.exists(target_config_path) or password_upgraded:
             try:
                 os.makedirs(os.path.dirname(target_config_path) or ".", exist_ok=True)
                 with open(target_config_path, "w", encoding="utf-8") as f:
                     yaml.dump(base_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
                 if missing:
                     logger.info(f"配置完整性已修复，补全缺失项: {missing}")
+                elif password_upgraded:
+                    logger.info("已将明文登录密码自动升级并写回配置文件")
                 else:
                     logger.info(f"已创建配置文件: {target_config_path}")
             except Exception as e:
@@ -214,6 +239,7 @@ class Config:
         """将配置写入文件并重新加载（设置页保存时调用）；new_config 为完整配置对象"""
         new_config = copy.deepcopy(new_config)
         new_config.pop("database", None)
+        self._upgrade_security_password_if_needed(new_config)
         self._file_config = new_config
         try:
             with open(self._config_path, "w", encoding="utf-8") as f:

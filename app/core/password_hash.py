@@ -78,3 +78,8 @@ def verify_password(password: str, stored: str) -> bool:
 
     actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, parsed.iterations)
     return hmac.compare_digest(actual, expected)
+
+
+def is_password_hash(value: str) -> bool:
+    """判断字符串是否为受支持的密码哈希格式。"""
+    return _parse_hash(value) is not None
