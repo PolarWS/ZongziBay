@@ -86,9 +86,11 @@ docker run -d \
 ### 2. 配置 qBittorrent / TMDB / Assrt
 
 - 《[API Key 获取指南（TMDB / Assrt）](api_keys_guide.md)》
-- 填写 qBittorrent 的账号、密码、JWT 密钥
+- 修改登录的账号、密码、JWT 密钥
+- 填写 qBittorrent 的账号、密码
 - TMDB：用于影片海报、简介等元数据，填写 API Key
 - Assrt：用于字幕自动搜索与下载，填写你的 Token
+- 填写完成后请自行点击最上方的 **「测试全部」按钮进行测试** ，确保连接成功
 
 ### 3. 配置路径与整理规则
 
