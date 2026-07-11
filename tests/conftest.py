@@ -11,6 +11,15 @@ _test_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _test_db.close()
 os.environ["ZONGZI_DATABASE_PATH"] = os.path.abspath(_test_db.name)
 
+# CI 环境没有 config.yml，通过环境变量注入测试用的用户名和密码
+# 密码直接用 bcrypt 哈希值，避免被 _hash_env_password_if_needed 做 SHA-256 二次哈希
+# （生产环境前端会做 SHA-256 预处理，但测试直接用明文密码）
+os.environ["ZONGZI_SECURITY_USERNAME"] = "admin"
+import bcrypt as _conftest_bcrypt
+os.environ["ZONGZI_SECURITY_PASSWORD"] = _conftest_bcrypt.hashpw(
+    "password123".encode("utf-8"), _conftest_bcrypt.gensalt(rounds=12)
+).decode("utf-8")
+
 import pytest
 from fastapi.testclient import TestClient
 
