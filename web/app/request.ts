@@ -102,6 +102,10 @@ client.interceptors.response.use(
 )
 
 async function clearAuthAndRedirect() {
+  const originSuffix = window.location.origin.replace(/[.:]/g, '_')
+  localStorage.removeItem(`access_token_${originSuffix}`)
+  localStorage.removeItem(`auth_checked_${originSuffix}`)
+  // 也清理旧版全局 key（兼容升级场景）
   localStorage.removeItem('access_token')
   localStorage.removeItem('auth_checked')
   const path = window.location.pathname
@@ -124,7 +128,7 @@ export default async function request<T = any>(url: string, options: AxiosReques
   const res: AxiosResponse<T> = await client.request({ url, ...options })
   const payload: any = res.data as any
   if (payload && typeof payload === 'object' && 'code' in payload && payload.code !== 200) {
-    // ===== 未登录 (40100)：清除状态并跳转登录页 =====
+    // ===== 未登录 (40100)：清除当前实例状态并跳转登录页 =====
     if (payload.code === 40100) {
       await clearAuthAndRedirect()
       throw new Error(payload.message || '请先登录')

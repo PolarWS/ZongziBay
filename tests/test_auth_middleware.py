@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from jose import jwt
 
-from app.core.auth_middleware import AUTH_WHITELIST, _verify_token_sync, JWTAuthMiddleware
+from app.core.auth_middleware import _AUTH_WHITELIST, _verify_token_sync, JWTAuthMiddleware
 from app.core.security import create_access_token, create_refresh_token
 
 SECRET = "test-secret-key"
@@ -27,34 +27,34 @@ class TestAuthWhitelist:
     """白名单路径列表确认"""
 
     def test_login_in_whitelist(self):
-        assert "/api/v1/users/login" in AUTH_WHITELIST
+        assert "/api/v1/users/login" in _AUTH_WHITELIST
 
     def test_refresh_in_whitelist(self):
-        assert "/api/v1/users/refresh" in AUTH_WHITELIST
+        assert "/api/v1/users/refresh" in _AUTH_WHITELIST
 
     def test_health_in_whitelist(self):
-        assert "/api/v1/health" in AUTH_WHITELIST
+        assert "/api/v1/health" in _AUTH_WHITELIST
 
     def test_system_status_in_whitelist(self):
-        assert "/api/v1/system/status" in AUTH_WHITELIST
+        assert "/api/v1/system/status" in _AUTH_WHITELIST
 
     def test_system_setup_in_whitelist(self):
-        assert "/api/v1/system/setup" in AUTH_WHITELIST
+        assert "/api/v1/system/setup" in _AUTH_WHITELIST
 
     def test_system_env_config_in_whitelist(self):
-        assert "/api/v1/system/env-config" in AUTH_WHITELIST
+        assert "/api/v1/system/env-config" in _AUTH_WHITELIST
 
     def test_system_existing_config_in_whitelist(self):
-        assert "/api/v1/system/existing-config" in AUTH_WHITELIST
+        assert "/api/v1/system/existing-config" in _AUTH_WHITELIST
 
     def test_system_test_connection_in_whitelist(self):
-        assert "/api/v1/system/test-connection" in AUTH_WHITELIST
+        assert "/api/v1/system/test-connection" in _AUTH_WHITELIST
 
     def test_me_not_in_whitelist(self):
-        assert "/api/v1/users/me" not in AUTH_WHITELIST
+        assert "/api/v1/users/me" not in _AUTH_WHITELIST
 
     def test_tasks_not_in_whitelist(self):
-        assert "/api/v1/tasks/list" not in AUTH_WHITELIST
+        assert "/api/v1/tasks/list" not in _AUTH_WHITELIST
 
 
 class TestVerifyTokenSync:

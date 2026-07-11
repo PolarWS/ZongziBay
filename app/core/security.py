@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
@@ -127,7 +128,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(UTC) + timedelta(minutes=get_access_token_expire_minutes())
+        expire_minutes = get_access_token_expire_minutes()
+        expire = datetime.now(UTC) + timedelta(minutes=expire_minutes)
+        logging.getLogger(__name__).info(
+            f"Access Token 生成: exp={expire.isoformat()}, expire_minutes={expire_minutes}"
+        )
     to_encode.update({"exp": expire, "type": "access"})
     encoded_jwt = jwt.encode(to_encode, get_secret_key(), algorithm=get_algorithm())
     return encoded_jwt

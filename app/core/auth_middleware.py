@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from typing import Optional
 
 from fastapi import Request
@@ -12,25 +13,24 @@ from app.core.security import get_algorithm, get_secret_key
 
 logger = logging.getLogger(__name__)
 
-# =====================================================================
 # 放行白名单：无需 JWT 认证的接口路径
-# 后续需要放行新接口时，在此列表中添加即可
-# 支持精确匹配和前缀匹配（路径本身及其子路径均放行）
-# 例如: "/api/v1/health" 会同时放行 /api/v1/health 和 /api/v1/health/xxx
-# =====================================================================
-AUTH_WHITELIST = [
-    "/api/v1/users/login",       # 登录接口
-    "/api/v1/users/refresh",     # Token 刷新接口
-    "/api/v1/health",            # 健康检查
-    "/api/v1/system/status",     # 系统初始化状态检查
-    "/api/v1/system/env-config", # Docker 环境变量
-    "/api/v1/system/existing-config",  # 初始化前读取已有配置
-    "/api/v1/system/setup",      # 初始化设置
-    "/api/v1/system/test-connection",  # 连通性测试（初始化引导页需要）
-    "/api/v1/system/preferences",  # 显示偏好（初始化引导页需要读写）
-    "/api/v1/system/config/apply-default-tmdb-key",   # 应用默认 TMDB 密钥（初始化引导页需要）
-    "/api/v1/system/config/apply-default-assrt-key",  # 应用默认 ASSRT 令牌（初始化引导页需要）
+_AUTH_WHITELIST = [
+    "/api/v1/users/login",
+    "/api/v1/users/refresh",
+    "/api/v1/health",
+    "/api/v1/system/status",
+    "/api/v1/system/env-config",
+    "/api/v1/system/existing-config",
+    "/api/v1/system/setup",
+    "/api/v1/system/test-connection",
+    "/api/v1/system/preferences",
+    "/api/v1/system/config/apply-default-tmdb-key",
+    "/api/v1/system/config/apply-default-assrt-key",
 ]
+
+# Cookie 名称后缀：与 users.py 保持一致，支持多实例
+_COOKIE_SUFFIX = os.getenv("ZONGZI_COOKIE_SUFFIX", "")
+_ACCESS_TOKEN_COOKIE = f"access_token{'_' + _COOKIE_SUFFIX if _COOKIE_SUFFIX else ''}"
 
 
 def _verify_token_sync(token: str) -> Optional[str]:
@@ -68,13 +68,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # 白名单路径直接放行
-        for wp in AUTH_WHITELIST:
+        for wp in _AUTH_WHITELIST:
             wp_clean = wp.rstrip("/")
             if path == wp_clean or path.startswith(wp_clean + "/"):
                 return await call_next(request)
 
         # 提取 Token：优先从 httpOnly Cookie 读取，其次从 Authorization 头读取
-        token: Optional[str] = request.cookies.get("access_token")
+        token: Optional[str] = request.cookies.get(_ACCESS_TOKEN_COOKIE)
         if not token:
             auth_header = request.headers.get("Authorization")
             if auth_header and auth_header.startswith("Bearer "):

@@ -5,7 +5,7 @@ import os
 import yaml
 from typing import Any, Dict
 
-from app.core.password_hash import hash_password, is_password_hash
+from app.core.password_hash import is_password_hash
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,8 @@ class Config:
 
     def _upgrade_security_password_if_needed(self, cfg: Dict[str, Any]) -> bool:
         """
-        若 security.password 为明文，则自动升级为 PBKDF2 哈希。
+        若 security.password 为明文，则自动升级为 bcrypt(SHA-256(明文)) 哈希。
+        与前端 SHA-256 + bcrypt 双重哈希流程保持一致。
         返回是否发生了升级。
         """
         if not isinstance(cfg, dict):
@@ -70,12 +71,21 @@ class Config:
         password = security.get("password")
         if not isinstance(password, str) or not password.strip():
             return False
-        if is_password_hash(password):
+        # 识别已哈希的密码（旧版 PBKDF2 和新版 bcrypt），避免重复加密
+        if is_password_hash(password) or password.startswith("$2b$") or password.startswith("$2a$"):
             return False
 
-        security["password"] = hash_password(password)
-        logger.info("检测到明文 security.password，已自动升级为 PBKDF2 哈希")
-        return True
+        try:
+            import bcrypt as _bcrypt
+            import hashlib as _hashlib
+            sha256_hex = _hashlib.sha256(password.encode("utf-8")).hexdigest()
+            hashed = _bcrypt.hashpw(sha256_hex.encode("utf-8")[:72], _bcrypt.gensalt(rounds=12)).decode("utf-8")
+            security["password"] = hashed
+            logger.info("检测到明文 security.password，已自动升级为 bcrypt(SHA-256(明文)) 哈希")
+            return True
+        except Exception:
+            logger.warning("明文密码自动升级失败", exc_info=True)
+            return False
 
     def _load_default_config(self) -> Dict[str, Any]:
         """
@@ -204,6 +214,8 @@ class Config:
 
         self._file_config = copy.deepcopy(base_config)
         self._override_from_env(base_config)
+        # 环境变量注入的明文密码需做 SHA-256 → bcrypt 哈希（仅内存，不写回文件）
+        self._hash_env_password_if_needed(base_config)
         self._config = base_config
 
     def _migrate_password_if_needed(self, base_config: dict, config_path: str) -> None:
@@ -236,6 +248,28 @@ class Config:
             logger.info("密码已自动升级为 SHA-256 → bcrypt 双重哈希")
         except Exception:
             logger.warning("密码哈希自动升级失败，将在下次登录时重试", exc_info=True)
+
+    def _hash_env_password_if_needed(self, base_config: dict) -> None:
+        """处理从环境变量（如 ZONGZI_SECURITY_PASSWORD）注入的明文密码。
+        Docker 环境变量覆盖发生在 _migrate_password_if_needed 之后，
+        此方法确保 env 注入的明文密码也经过 SHA-256 → bcrypt 双重哈希。
+        仅修改内存中的配置，不写回文件（环境变量不在配置文件中）。"""
+        security = base_config.get("security") or {}
+        pwd = security.get("password")
+        if not pwd or not isinstance(pwd, str):
+            return
+        # 已是哈希格式，无需处理
+        if pwd.startswith("$2b$") or pwd.startswith("$2a$") or pwd.startswith("pbkdf2_sha256$"):
+            return
+        try:
+            import bcrypt as _bcrypt
+            import hashlib as _hashlib
+            sha256_hex = _hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+            hashed = _bcrypt.hashpw(sha256_hex.encode("utf-8")[:72], _bcrypt.gensalt(rounds=12)).decode("utf-8")
+            security["password"] = hashed
+            logger.info("环境变量注入的明文密码已哈希（仅内存，不写回文件）")
+        except Exception:
+            logger.warning("环境变量密码哈希失败", exc_info=True)
 
     def get(self, key: str, default: Any = None) -> Any:
         """

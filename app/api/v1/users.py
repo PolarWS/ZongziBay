@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import timedelta
 
 from fastapi import APIRouter, Cookie, Depends, Request, Response
@@ -30,12 +31,23 @@ _COOKIE_SECURE = False  # 开发环境不强制 HTTPS，生产环境通过反向
 _COOKIE_SAMESITE = "lax"
 _COOKIE_PATH = "/api"
 
+# Cookie 名称后缀：同一主机多实例时，通过 ZONGZI_COOKIE_SUFFIX 区分
+# 示例: ZONGZI_COOKIE_SUFFIX=_p8000 → cookie 名为 access_token_p8000 / refresh_token_p8000
+_COOKIE_SUFFIX = os.getenv("ZONGZI_COOKIE_SUFFIX", "")
+_ACCESS_TOKEN_KEY = f"access_token{'_' + _COOKIE_SUFFIX if _COOKIE_SUFFIX else ''}"
+_REFRESH_TOKEN_KEY = f"refresh_token{'_' + _COOKIE_SUFFIX if _COOKIE_SUFFIX else ''}"
+
+
+def _get_cookie_keys():
+    """返回 (access_token_key, refresh_token_key)"""
+    return _ACCESS_TOKEN_KEY, _REFRESH_TOKEN_KEY
+
 
 def _set_access_token_cookie(response: Response, token: str) -> None:
     """在响应中设置 httpOnly Cookie 存储 Access Token"""
     max_age = get_access_token_expire_minutes() * 60
     response.set_cookie(
-        key="access_token",
+        key=_ACCESS_TOKEN_KEY,
         value=token,
         max_age=max_age,
         httponly=_COOKIE_HTTP_ONLY,
@@ -51,7 +63,7 @@ def _set_refresh_token_cookie(response: Response, token: str) -> None:
     refresh_days = int(config.get("security.refresh_token_expire_days", 7) or 7)
     max_age = refresh_days * 24 * 60 * 60
     response.set_cookie(
-        key="refresh_token",
+        key=_REFRESH_TOKEN_KEY,
         value=token,
         max_age=max_age,
         httponly=_COOKIE_HTTP_ONLY,
@@ -64,14 +76,14 @@ def _set_refresh_token_cookie(response: Response, token: str) -> None:
 def _clear_auth_cookies(response: Response) -> None:
     """清除认证相关的 Cookie"""
     response.delete_cookie(
-        key="access_token",
+        key=_ACCESS_TOKEN_KEY,
         httponly=_COOKIE_HTTP_ONLY,
         secure=_COOKIE_SECURE,
         samesite=_COOKIE_SAMESITE,
         path=_COOKIE_PATH,
     )
     response.delete_cookie(
-        key="refresh_token",
+        key=_REFRESH_TOKEN_KEY,
         httponly=_COOKIE_HTTP_ONLY,
         secure=_COOKIE_SECURE,
         samesite=_COOKIE_SAMESITE,
@@ -108,6 +120,15 @@ async def login_for_access_token(
     # 使用 bcrypt 验证密码（后续前端均已做 SHA-256，此处直接做 bcrypt 校验）
     if form_data.username != conf_username or not verify_password(form_data.password, conf_password or ""):
         logger.warning(f"登录失败: username_match={form_data.username == conf_username}")
+
+        # 如果存储的是旧版 PBKDF2 哈希（rc.6 及之前），新前端传 SHA-256 后无法验证
+        if is_pbkdf2_hash(conf_password or ""):
+            raise BusinessException(
+                code=ErrorCode.PARAMS_ERROR,
+                message="检测到旧版密码格式（v1.0.0-rc.6 及之前），新版前端已不兼容。"
+                        "请在 Docker 启动时设置环境变量 ZONGZI_SECURITY_PASSWORD 重新指定密码，"
+                        "或删除 config.yml 中的 security.password 后重新初始化。",
+            )
         raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="用户名或密码错误")
 
     # 如果文件中的密码是明文或旧版 PBKDF2，自动升级为 bcrypt 哈希
@@ -149,7 +170,7 @@ async def login_for_access_token(
 @router.post("/refresh", response_model=BaseResponse[Token], summary="刷新 Access Token")
 async def refresh_access_token(
     response: Response,
-    refresh_token: str = Cookie(default=None, alias="refresh_token"),
+    refresh_token: str = Cookie(default=None, alias=_REFRESH_TOKEN_KEY),
 ):
     """使用 Refresh Token 获取新的 Access Token。
     从 httpOnly Cookie 中读取 refresh_token 进行验证。"""
