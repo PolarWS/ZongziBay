@@ -29,16 +29,23 @@ _MASKED_PLACEHOLDER = "****"
 
 
 def _mask_sensitive_keys(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """对配置中的 TMDB api_key、ASSRT token、qBittorrent password/api_key、安全密码 进行脱敏"""
+    """对配置中的 TMDB api_key、ASSRT token、qBittorrent password/api_key、安全密码 进行脱敏，
+    同时标记是否为项目内置默认密钥（供前端判断提示文案）"""
     cfg = copy.deepcopy(cfg)
     tmdb = cfg.get("tmdb")
-    if isinstance(tmdb, dict) and tmdb.get("api_key"):
-        tmdb["api_key"] = _MASKED_PLACEHOLDER
+    if isinstance(tmdb, dict):
+        api_key = tmdb.get("api_key")
+        if api_key:
+            tmdb["api_key"] = _MASKED_PLACEHOLDER
+            tmdb["_is_default_key"] = (api_key == _DEFAULT_TMDB_API_KEY)
     subtitle = cfg.get("subtitle")
     if isinstance(subtitle, dict):
         assrt = subtitle.get("assrt")
-        if isinstance(assrt, dict) and assrt.get("token"):
-            assrt["token"] = _MASKED_PLACEHOLDER
+        if isinstance(assrt, dict):
+            token = assrt.get("token")
+            if token:
+                assrt["token"] = _MASKED_PLACEHOLDER
+                assrt["_is_default_token"] = (token == _DEFAULT_ASSRT_TOKEN)
     qb = cfg.get("qbittorrent")
     if isinstance(qb, dict):
         if qb.get("password"):
@@ -55,6 +62,17 @@ def _mask_sensitive_keys(cfg: Dict[str, Any]) -> Dict[str, Any]:
 def _restore_masked_keys(body: Dict[str, Any]) -> Dict[str, Any]:
     """若前端上传的密钥字段为脱敏占位符，则从已有配置中恢复真实值"""
     body = copy.deepcopy(body)
+
+    # 清理前端可能回传的元数据标记字段（不作为实际配置保存）
+    tmdb = body.get("tmdb")
+    if isinstance(tmdb, dict):
+        tmdb.pop("_is_default_key", None)
+    subtitle = body.get("subtitle")
+    if isinstance(subtitle, dict):
+        assrt = subtitle.get("assrt")
+        if isinstance(assrt, dict):
+            assrt.pop("_is_default_token", None)
+
     existing = config.get_file_config()
     tmdb = body.get("tmdb")
     if isinstance(tmdb, dict) and tmdb.get("api_key") == _MASKED_PLACEHOLDER:
@@ -78,6 +96,14 @@ def _restore_masked_keys(body: Dict[str, Any]) -> Dict[str, Any]:
             old_key = (existing.get("qbittorrent") or {}).get("api_key") or ""
             if old_key and old_key != _MASKED_PLACEHOLDER:
                 qb["api_key"] = old_key
+
+    # 登录密码脱敏恢复 — 前端看不到真实值，按 tb"****"原样提交，需用已有哈希恢复
+    sec = body.get("security")
+    if isinstance(sec, dict) and sec.get("password") == _MASKED_PLACEHOLDER:
+        old = (existing.get("security") or {}).get("password") or ""
+        if old and old != _MASKED_PLACEHOLDER:
+            sec["password"] = old
+
     return body
 
 

@@ -82,11 +82,11 @@ client.interceptors.response.use(
 
         // 刷新失败，清除状态并跳转登录页
         processQueue(new Error('Refresh failed'))
-        clearAuthAndRedirect()
+        await clearAuthAndRedirect()
         return Promise.reject(new Error('凭证已过期，请重新登录'))
       } catch (refreshError: any) {
         processQueue(refreshError)
-        clearAuthAndRedirect()
+        await clearAuthAndRedirect()
         return Promise.reject(refreshError)
       } finally {
         isRefreshing = false
@@ -101,12 +101,23 @@ client.interceptors.response.use(
   }
 )
 
-function clearAuthAndRedirect() {
+async function clearAuthAndRedirect() {
   localStorage.removeItem('access_token')
   localStorage.removeItem('auth_checked')
-  if (window.location.pathname !== '/login' && window.location.pathname !== '/setup') {
-    window.location.href = '/login'
-  }
+  const path = window.location.pathname
+  if (path === '/login' || path === '/setup') return
+
+  // 系统未初始化时跳转到引导页，否则跳登录页
+  try {
+    const res = await Axios.get(`${client.defaults.baseURL}/api/v1/system/status`, {
+      withCredentials: true,
+    } as any)
+    if (res.data?.data && !res.data.data.initialized) {
+      window.location.href = '/setup'
+      return
+    }
+  } catch { /* 状态检查失败，跳登录页兜底 */ }
+  window.location.href = '/login'
 }
 
 export default async function request<T = any>(url: string, options: AxiosRequestConfig): Promise<T> {
@@ -115,7 +126,7 @@ export default async function request<T = any>(url: string, options: AxiosReques
   if (payload && typeof payload === 'object' && 'code' in payload && payload.code !== 200) {
     // ===== 未登录 (40100)：清除状态并跳转登录页 =====
     if (payload.code === 40100) {
-      clearAuthAndRedirect()
+      await clearAuthAndRedirect()
       throw new Error(payload.message || '请先登录')
     }
     // 如果配置了 skipErrorHandler，则不显示全局错误提示

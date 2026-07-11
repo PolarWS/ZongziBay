@@ -20,6 +20,20 @@ if ($TZ -eq "China Standard Time") {
 }
 Write-Host "Detected host timezone: $TZ"
 
+# --- 1.5 清理本地旧容器和 volume ---
+$oldContainer = docker ps -a --filter "ancestor=$REPO_NAME" --format "{{.ID}}" 2>$null
+if ($oldContainer) {
+    Write-Host "Stopping and removing old container: $oldContainer"
+    docker stop $oldContainer 2>$null
+    docker rm $oldContainer 2>$null
+}
+
+$oldVolumes = docker volume ls --filter "name=$REPO_NAME" --format "{{.Name}}" 2>$null
+if ($oldVolumes) {
+    Write-Host "Removing old volumes: $oldVolumes"
+    docker volume rm $oldVolumes 2>$null
+}
+
 # --- 2. 构建镜像 (同时打两个标签) ---
 Write-Host "----------------------------------------"
 Write-Host "Step 1: Building Docker Image [$IMAGE_WITH_TAG]..."
@@ -27,8 +41,8 @@ Write-Host "With Timezone: $TZ"
 Write-Host "Also Tagging as [$LATEST_TAG]..."
 Write-Host "----------------------------------------"
 
-# 一次构建，两个标签，并传入时区参数 (使用引号处理可能的空格)
-docker build --build-arg "TZ=$TZ" -t $IMAGE_WITH_TAG -t $LATEST_TAG .
+# --no-cache 确保 config.yml 等每次重新 COPY，不使用旧缓存层
+docker build --no-cache --build-arg "TZ=$TZ" -t $IMAGE_WITH_TAG -t $LATEST_TAG .
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Docker build failed!"

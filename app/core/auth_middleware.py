@@ -27,6 +27,9 @@ AUTH_WHITELIST = [
     "/api/v1/system/existing-config",  # 初始化前读取已有配置
     "/api/v1/system/setup",      # 初始化设置
     "/api/v1/system/test-connection",  # 连通性测试（初始化引导页需要）
+    "/api/v1/system/preferences",  # 显示偏好（初始化引导页需要读写）
+    "/api/v1/system/config/apply-default-tmdb-key",   # 应用默认 TMDB 密钥（初始化引导页需要）
+    "/api/v1/system/config/apply-default-assrt-key",  # 应用默认 ASSRT 令牌（初始化引导页需要）
 ]
 
 

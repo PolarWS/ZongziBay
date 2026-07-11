@@ -1,8 +1,10 @@
 import { readUsersMeApiV1UsersMeGet } from '~/api/users'
+import { getSystemStatusApiV1SystemStatusGet } from '~/api/system'
 
 /**
  * 全局路由守卫
  * - /setup 页面始终允许访问（系统初始化引导）
+ * - 系统未初始化时，所有其他路由强制跳转到 /setup
  * - 访问 /login 时若已登录则跳转首页
  * - 访问其他页面时通过 API 检查认证状态
  */
@@ -10,6 +12,19 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // 初始化引导页面无需认证
   if (to.path === '/setup') {
     return
+  }
+
+  // SSR/SSG 预渲染阶段无后端可用，跳过所有 API 调用，交给客户端判断
+  if (import.meta.server) return
+
+  // 检查系统是否已初始化，未初始化则跳转引导页
+  try {
+    const statusRes = await getSystemStatusApiV1SystemStatusGet({ skipErrorHandler: true })
+    if (statusRes.data && !statusRes.data.initialized) {
+      return navigateTo('/setup')
+    }
+  } catch {
+    // 网络错误等，继续后续认证检查
   }
 
   const { isAuthenticated, setToken, clearToken } = useAuth()

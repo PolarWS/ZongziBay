@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, Response
 
 from app.api.v1.api import api_router
 from app.core import db
@@ -18,6 +18,19 @@ from app.services.task_monitor import task_monitor
 # 修复 Windows 下 MIME 类型可能不正确的问题
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("application/javascript", ".mjs")
+
+# HTML 禁止缓存响应头，避免版本更新后用户被旧缓存"卡住"
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+def _file_response_with_nocache(filepath: str) -> Response:
+    """返回带禁止缓存头的 FileResponse，用于 HTML 页面"""
+    resp = FileResponse(filepath)
+    resp.headers.update(_NO_CACHE_HEADERS)
+    return resp
 mimetypes.add_type("text/css", ".css")
 
 # 配置日志格式
@@ -105,7 +118,7 @@ if os.path.isdir(static_dir):
     async def serve_root():
         index_path = os.path.join(static_dir, "index.html")
         if os.path.isfile(index_path):
-            return FileResponse(index_path)
+            return _file_response_with_nocache(index_path)
         raise HTTPException(status_code=404, detail="Index not found")
 
     # 捕获所有其他路径，支持 SPA 路由
@@ -118,12 +131,15 @@ if os.path.isdir(static_dir):
         # 检查文件是否存在
         file_path = os.path.join(static_dir, path)
         if os.path.isfile(file_path):
+            # HTML 文件禁止缓存，其他静态资源正常缓存
+            if path.endswith(".html"):
+                return _file_response_with_nocache(file_path)
             return FileResponse(file_path)
             
-        # 默认返回 index.html
+        # 默认返回 index.html（SPA fallback 禁止缓存）
         index_path = os.path.join(static_dir, "index.html")
         if os.path.isfile(index_path):
-            return FileResponse(index_path)
+            return _file_response_with_nocache(index_path)
             
         raise HTTPException(status_code=404, detail="Not Found")
 

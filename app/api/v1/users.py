@@ -104,7 +104,7 @@ async def login_for_access_token(
 
     logger.info(f"登录尝试: username={form_data.username}, config_username={conf_username}, password_len={len(form_data.password)}, config_password_is_hashed={is_hashed(conf_password or '')}")
 
-    # 使用 bcrypt 验证密码（兼容明文旧数据）
+    # 使用 bcrypt 验证密码（后续前端均已做 SHA-256，此处直接做 bcrypt 校验）
     if form_data.username != conf_username or not verify_password(form_data.password, conf_password or ""):
         logger.warning(f"登录失败: username_match={form_data.username == conf_username}")
         raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="用户名或密码错误")

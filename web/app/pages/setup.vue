@@ -27,6 +27,7 @@ import {
   ExternalLink,
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
+import { sha256 } from '@/utils/crypto'
 import {
   Dialog,
   DialogContent,
@@ -66,7 +67,7 @@ const password = ref('')
 const showPassword = ref(false)
 const secretKey = ref('')
 const showSecretKey = ref(false)
-const qbHost = ref('http://192.168.2.132:8080')
+const qbHost = ref('')
 const qbUsername = ref('')
 const qbPassword = ref('')
 const qbApiKey = ref('')
@@ -131,9 +132,11 @@ const confirmApplyDefaultKeys = async () => {
   try {
     if (target === 'tmdb') {
       await applyDefaultTmdbKeyApiV1SystemConfigApplyDefaultTmdbKeyPost()
+      existingFields.tmdbApiKey = true
       toast.success('TMDB 默认密钥已应用')
     } else {
       await applyDefaultAssrtKeyApiV1SystemConfigApplyDefaultAssrtKeyPost()
+      existingFields.assrtToken = true
       toast.success('ASSRT 默认令牌已应用')
     }
   } catch (e: any) {
@@ -432,7 +435,7 @@ async function submitSetup() {
     await setupSystemApiV1SystemSetupPost(
       {
         username: username.value,
-        password: password.value,
+        password: password.value ? await sha256(password.value) : '',
         secret_key: secretKey.value,
         qb_host: qbHost.value,
         qb_username: qbUsername.value,

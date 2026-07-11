@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { toast } from 'vue-sonner'
+import { sha256 } from '@/utils/crypto'
 
 // --- 本地偏好 key ---
 const THEME_KEY = 'zongzi_theme'
@@ -159,6 +160,16 @@ const animeGardenPageSize = ref<number | null>(null)
 
 const assrtToken = ref('')
 const assrtBaseUrl = ref('')
+const isDefaultTmdbKey = ref(false)
+const isDefaultAssrtToken = ref(false)
+
+// 当用户手动修改密钥时，自动清除"默认密钥"标记
+watch(tmdbApiKey, (val) => {
+  if (val && val !== MASKED) isDefaultTmdbKey.value = false
+})
+watch(assrtToken, (val) => {
+  if (val && val !== MASKED) isDefaultAssrtToken.value = false
+})
 
 const pathsDownloadRootPath = ref('')
 const pathsTargetRootPath = ref('')
@@ -194,6 +205,7 @@ const applyConfigToForm = (cfg: Record<string, any>) => {
   tmdbLanguage.value = tmdb.language ?? ''
   tmdbApiDomain.value = tmdb.api_domain ?? ''
   tmdbImageDomain.value = tmdb.image_domain ?? ''
+  isDefaultTmdbKey.value = !!tmdb._is_default_key
 
   const qb = cfg.qbittorrent || {}
   qbHost.value = qb.host ?? ''
@@ -220,6 +232,7 @@ const applyConfigToForm = (cfg: Record<string, any>) => {
   const assrt = subtitle.assrt || {}
   assrtToken.value = assrt.token ?? ''
   assrtBaseUrl.value = assrt.base_url ?? ''
+  isDefaultAssrtToken.value = !!assrt._is_default_token
 
   const pathsCfg = cfg.paths || {}
   pathsDownloadRootPath.value = pathsCfg.download_root_path ?? ''
@@ -264,7 +277,7 @@ const saveConfig = async () => {
 
   cfg.security = cfg.security || {}
   cfg.security.username = securityUsername.value
-  cfg.security.password = securityPassword.value
+  cfg.security.password = securityPassword.value !== MASKED ? await sha256(securityPassword.value) : securityPassword.value
   cfg.security.secret_key = securitySecretKey.value
   cfg.security.algorithm = securityAlgorithm.value
   if (securityAccessTokenExpireMinutes.value != null) {
@@ -653,6 +666,7 @@ onUnmounted(() => {
     </section>
 
     <!-- 系统配置（可编辑并保存到服务端 config 文件） -->
+    <form @submit.prevent>
     <section class="rounded-xl border border-border bg-card p-5 sm:p-7 space-y-5">
       <div class="flex items-center gap-2 text-muted-foreground">
         <FileJson class="h-5 w-5" />
@@ -787,7 +801,7 @@ onUnmounted(() => {
                   {{ applyingDefaults.tmdb ? '应用中…' : '使用项目默认密钥' }}
                 </Button>
               </div>
-              <p v-if="tmdbApiKey === MASKED" class="text-xs text-emerald-500">
+              <p v-if="isDefaultTmdbKey" class="text-xs text-emerald-500">
                 已使用项目提供的默认密钥，你也可以替换为自己的 API Key
               </p>
             </div>
@@ -957,7 +971,7 @@ onUnmounted(() => {
                   {{ applyingDefaults.assrt ? '应用中…' : '使用项目默认密钥' }}
                 </Button>
               </div>
-              <p v-if="assrtToken === MASKED" class="text-xs text-emerald-500">
+              <p v-if="isDefaultAssrtToken" class="text-xs text-emerald-500">
                 已使用项目提供的默认令牌，你也可以替换为自己的 Token
               </p>
             </div>
@@ -1144,6 +1158,7 @@ onUnmounted(() => {
         </div>
       </div>
     </section>
+    </form>
 
     <!-- 关于 -->
     <section class="rounded-xl border border-border bg-card p-5 sm:p-7 space-y-5">

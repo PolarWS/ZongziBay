@@ -182,7 +182,9 @@ class Config:
         self._config = base_config
 
     def _migrate_password_if_needed(self, base_config: dict, config_path: str) -> None:
-        """如果配置中的密码是明文，自动升级为 bcrypt 哈希并写回配置文件"""
+        """如果配置中的密码是明文，先 SHA-256 再 bcrypt 哈希并写回配置文件。
+        前端传输密码时已做 SHA-256 处理，此处确保 Docker 环境变量注入的明文密码
+        也使用相同流程存储（bcrypt(SHA-256(raw))）。"""
         security = base_config.get("security") or {}
         pwd = security.get("password")
         if not pwd or not isinstance(pwd, str):
@@ -192,13 +194,14 @@ class Config:
             return
         try:
             import bcrypt
-            # bcrypt 最多处理 72 字节
-            raw = pwd.encode("utf-8")[:72]
-            hashed = bcrypt.hashpw(raw, bcrypt.gensalt(rounds=12)).decode("utf-8")
+            import hashlib
+            # 先 SHA-256（与前端保持一致），再 bcrypt（bcrypt 最多处理 72 字节）
+            sha256_hex = hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+            hashed = bcrypt.hashpw(sha256_hex.encode("utf-8")[:72], bcrypt.gensalt(rounds=12)).decode("utf-8")
             security["password"] = hashed
             with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(base_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-            logger.info("密码已从明文自动升级为 bcrypt 哈希")
+            logger.info("密码已自动升级为 SHA-256 → bcrypt 双重哈希")
         except Exception:
             logger.warning("密码哈希自动升级失败，将在下次登录时重试", exc_info=True)
 

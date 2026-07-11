@@ -6,6 +6,7 @@ import { Loader2, Lock, User, KeyRound } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import api from '@/api'
 import { getSystemStatusApiV1SystemStatusGet } from '@/api/system'
+import { sha256 } from '@/utils/crypto'
 
 definePageMeta({
   layout: false,
@@ -39,7 +40,7 @@ const handleLogin = async () => {
   loading.value = true
   try {
     const res = await api.users.loginForAccessTokenApiV1UsersLoginPost(
-      { username: username.value, password: password.value },
+      { username: username.value, password: await sha256(password.value) },
       { skipErrorHandler: true },
     )
 
@@ -56,16 +57,28 @@ const handleLogin = async () => {
   }
 }
 
-// 页面加载时检查系统是否已初始化，未初始化则跳转引导页
-onMounted(async () => {
-  initChan()
+// 检查系统初始化状态，未初始化则跳转引导页
+const checkInitAndRedirect = async () => {
   try {
     const res = await getSystemStatusApiV1SystemStatusGet({ skipErrorHandler: true })
     if (res.data && !res.data.initialized) {
       await navigateTo('/setup')
+      return true
     }
   } catch {
     // 网络错误等，忽略
+  }
+  return false
+}
+
+// 页面加载时立即检查一次，3 秒后再检查一次（兜底客户端激活后的时序问题）
+onMounted(async () => {
+  initChan()
+  const redirected = await checkInitAndRedirect()
+  if (!redirected) {
+    setTimeout(async () => {
+      await checkInitAndRedirect()
+    }, 3000)
   }
 })
 </script>
@@ -107,7 +120,7 @@ onMounted(async () => {
       </div>
 
       <!-- 登录卡片 -->
-      <div class="login-card">
+      <form class="login-card" @submit.prevent="handleLogin">
         <!-- 卡片顶部光泽 -->
         <div class="card-shine" />
         <div class="space-y-4">
@@ -150,7 +163,7 @@ onMounted(async () => {
           <Loader2 v-if="loading" class="w-4 h-4 mr-2 animate-spin" />
           {{ loading ? '登录中...' : '登录' }}
         </Button>
-      </div>
+      </form>
 
       <!-- 底部 -->
       <p class="text-center text-xs text-muted-foreground/50 mt-6 tracking-widest uppercase">
