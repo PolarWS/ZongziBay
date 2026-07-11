@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Optional
 
@@ -15,17 +18,53 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/login", auto_error=False)
 # bcrypt 轮次数
 _BCRYPT_ROUNDS = 12
 
+# PBKDF2 方案标识（兼容旧版本 v1.0.0-rc.6 及之前）
+_PBKDF2_SCHEME = "pbkdf2_sha256"
+
 
 def _truncate_password(password: str) -> bytes:
     """bcrypt 最多处理 72 字节，截断超长密码并编码为 UTF-8"""
     return password.encode("utf-8")[:72]
 
 
+def _parse_pbkdf2_hash(encoded: str) -> Optional[tuple]:
+    """解析 pbkdf2_sha256$iterations$salt$digest 格式的旧密码哈希。
+    返回 (iterations, salt_bytes, digest_bytes)，解析失败返回 None。"""
+    if not isinstance(encoded, str) or not encoded.startswith(_PBKDF2_SCHEME + "$"):
+        return None
+    parts = encoded.split("$")
+    if len(parts) != 4:
+        return None
+    _, iters_s, salt_b64, digest_b64 = parts
+    try:
+        iters = int(iters_s)
+        if iters <= 0:
+            return None
+    except Exception:
+        return None
+
+    def _pad(b64: str) -> str:
+        return b64 + "=" * ((4 - len(b64) % 4) % 4)
+
+    try:
+        salt = base64.urlsafe_b64decode(_pad(salt_b64).encode("utf-8"))
+        digest = base64.urlsafe_b64decode(_pad(digest_b64).encode("utf-8"))
+    except Exception:
+        return None
+    return (iters, salt, digest)
+
+
+def is_pbkdf2_hash(encoded: str) -> bool:
+    """判断字符串是否为旧版 PBKDF2-SHA256 哈希格式"""
+    return _parse_pbkdf2_hash(encoded) is not None
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """验证密码：支持 bcrypt 哈希和明文回退（兼容旧数据）"""
+    """验证密码：支持 bcrypt 哈希、旧版 PBKDF2 哈希、明文回退（兼容历史数据）"""
     if not hashed_password:
         return False
-    # bcrypt 哈希以 $2b$ 或 $2a$ 开头
+
+    # 1. bcrypt 哈希以 $2b$ 或 $2a$ 开头
     if hashed_password.startswith("$2b$") or hashed_password.startswith("$2a$"):
         try:
             return bcrypt.checkpw(
@@ -34,7 +73,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
             )
         except (ValueError, TypeError):
             return False
-    # 回退：明文比对（用于旧数据的平滑升级）
+
+    # 2. 旧版 PBKDF2-SHA256 哈希（兼容 v1.0.0-rc.6 及之前版本）
+    pbkdf2 = _parse_pbkdf2_hash(hashed_password)
+    if pbkdf2 is not None:
+        iters, salt, expected_digest = pbkdf2
+        actual_digest = hashlib.pbkdf2_hmac(
+            "sha256", plain_password.encode("utf-8"), salt, iters,
+        )
+        return hmac.compare_digest(actual_digest, expected_digest)
+
+    # 3. 明文比对（用于旧数据的平滑升级）
     return plain_password == hashed_password
 
 
@@ -47,8 +96,12 @@ def hash_password(plain_password: str) -> str:
 
 
 def is_hashed(encoded: str) -> bool:
-    """判断字符串是否已经是 bcrypt 哈希值"""
-    return encoded.startswith("$2b$") or encoded.startswith("$2a$")
+    """判断字符串是否已经是密码哈希值（bcrypt 或 PBKDF2）"""
+    return (
+        encoded.startswith("$2b$")
+        or encoded.startswith("$2a$")
+        or is_pbkdf2_hash(encoded)
+    )
 
 
 def get_secret_key() -> str:

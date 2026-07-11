@@ -184,13 +184,20 @@ class Config:
     def _migrate_password_if_needed(self, base_config: dict, config_path: str) -> None:
         """如果配置中的密码是明文，先 SHA-256 再 bcrypt 哈希并写回配置文件。
         前端传输密码时已做 SHA-256 处理，此处确保 Docker 环境变量注入的明文密码
-        也使用相同流程存储（bcrypt(SHA-256(raw))）。"""
+        也使用相同流程存储（bcrypt(SHA-256(raw))）。
+        若为旧版 PBKDF2-SHA256 哈希（v1.0.0-rc.6 及之前版本），
+        则无法在启动时自动升级（需要用户登录提供原始密码），仅记录日志提示。"""
+
         security = base_config.get("security") or {}
         pwd = security.get("password")
         if not pwd or not isinstance(pwd, str):
             return
         # 已经是 bcrypt 哈希，无需升级
         if pwd.startswith("$2b$") or pwd.startswith("$2a$"):
+            return
+        # 旧版 PBKDF2 哈希：无法在启动时自动升级（需要原始密码），由登录接口触发升级
+        if isinstance(pwd, str) and pwd.startswith("pbkdf2_sha256$"):
+            logger.info("检测到旧版 PBKDF2-SHA256 密码哈希，将在用户下次登录时自动升级为 bcrypt")
             return
         try:
             import bcrypt

@@ -34,14 +34,41 @@ def _file_response_with_nocache(filepath: str) -> Response:
 mimetypes.add_type("text/css", ".css")
 
 # 配置日志格式
+_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format=_LOG_FORMAT,
+    datefmt=_LOG_DATE_FORMAT,
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
-# 只屏蔽 Uvicorn 的 HTTP 访问日志，保留应用自身的 INFO 日志
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+# uvicorn 日志配置字典 — 统一格式，消除 uvicorn 默认的 INFO:     前缀
+_UVICORN_LOG_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "format": _LOG_FORMAT,
+            "datefmt": _LOG_DATE_FORMAT,
+        },
+    },
+    "handlers": {
+        "default": {
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "loggers": {
+        "uvicorn": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+        "uvicorn.error": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+        "uvicorn.access": {"handlers": ["default"], "level": "WARNING", "propagate": False},
+    },
+}
+
+logger = logging.getLogger("zongzibay")
 
 
 # 获取项目根目录 (app/main.py -> app/ -> root)
@@ -62,11 +89,14 @@ def get_version():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动：初始化数据库并启动任务监控
+    logger.info(f"ZongziBay v{get_version()} 正在启动...")
     db.init_db()
     task_monitor.start()
+    logger.info("服务已就绪，监听 http://127.0.0.1:8000")
     yield
     # 关闭：停止任务监控
     task_monitor.stop()
+    logger.info("服务已停止")
 
 
 # 根据环境变量控制是否启用 API 文档（生产环境关闭以减少攻击面）
@@ -146,6 +176,4 @@ if os.path.isdir(static_dir):
 
 if __name__ == "__main__":
     import uvicorn
-    # 启动开发服务器
-    # reload=True 仅在开发模式下开启
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_config=_UVICORN_LOG_CONFIG)

@@ -15,6 +15,7 @@ from app.core.security import (
     get_current_user,
     hash_password,
     is_hashed,
+    is_pbkdf2_hash,
     verify_password,
 )
 from app.schemas.auth import Token, TokenData
@@ -109,10 +110,11 @@ async def login_for_access_token(
         logger.warning(f"登录失败: username_match={form_data.username == conf_username}")
         raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="用户名或密码错误")
 
-    # 如果文件中的密码是明文（非环境变量注入），自动升级为 bcrypt 哈希
+    # 如果文件中的密码是明文或旧版 PBKDF2，自动升级为 bcrypt 哈希
     file_cfg = config.get_file_config()
     file_password = (file_cfg.get("security") or {}).get("password", "")
     if file_password and not is_hashed(file_password):
+        # 明文密码 → bcrypt
         try:
             file_cfg.setdefault("security", {})
             file_cfg["security"]["password"] = hash_password(form_data.password)
@@ -120,6 +122,15 @@ async def login_for_access_token(
             logger.info("密码已从明文升级为 bcrypt 哈希")
         except Exception:
             logger.warning("密码哈希升级失败，将在下次登录时重试", exc_info=True)
+    elif is_pbkdf2_hash(file_password):
+        # 旧版 PBKDF2 → bcrypt 自动升级
+        try:
+            file_cfg.setdefault("security", {})
+            file_cfg["security"]["password"] = hash_password(form_data.password)
+            config.save_file_config(file_cfg)
+            logger.info("密码已从旧版 PBKDF2 升级为 bcrypt 哈希")
+        except Exception:
+            logger.warning("PBKDF2 密码升级失败，将在下次登录时重试", exc_info=True)
 
     access_token_expires = timedelta(minutes=get_access_token_expire_minutes())
     access_token = create_access_token(
