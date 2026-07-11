@@ -52,6 +52,9 @@ ZongziBay.db
 # Configuration (ignore all root-level config*.yml)
 /config*.yml
 
+# SSH Keys
+.ssh/
+
 # Docker & Build Artifacts
 publish.ps1
 zongzibay_*.tar
