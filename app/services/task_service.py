@@ -28,9 +28,12 @@ class TaskService:
         self.host = qb_config.get("host", "http://localhost:8080")
         self.username = qb_config.get("username", "admin")
         self.password = qb_config.get("password", "adminadmin")
+        self.api_key = qb_config.get("api_key", "") or ""
         self.trackers = config.get("trackers", []) or []
         # 连接参数变更后重建 client/session
-        self.qb_client = QBittorrentClient(self.host, self.username, self.password)
+        self.qb_client = QBittorrentClient(
+            host=self.host, username=self.username,
+            password=self.password, api_key=self.api_key)
 
     @staticmethod
     def _append_trackers(magnet_link: str, trackers: List[str]) -> str:

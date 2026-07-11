@@ -42,6 +42,7 @@ class MagnetService:
         self.host = qb_config.get("host", "http://localhost:8080")
         self.username = qb_config.get("username", "admin")
         self.password = qb_config.get("password", "adminadmin")
+        self.api_key = qb_config.get("api_key", "") or ""
         self.trackers = config.get("trackers", []) or []
         # 连接参数变更后重建 client/session，避免沿用旧 host 的 session
         self.client = None
@@ -58,7 +59,9 @@ class MagnetService:
 
     def _get_client(self):
         if not self.client:
-            self.client = QBittorrentClient(self.host, self.username, self.password)
+            self.client = QBittorrentClient(
+                host=self.host, username=self.username,
+                password=self.password, api_key=self.api_key)
         return self.client
 
     def check_connection(self) -> bool:

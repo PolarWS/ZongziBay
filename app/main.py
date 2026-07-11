@@ -56,11 +56,15 @@ async def lifespan(app: FastAPI):
     task_monitor.stop()
 
 
+# 根据环境变量控制是否启用 API 文档（生产环境关闭以减少攻击面）
+_is_dev = os.getenv("APP_ENV", "").lower() in ("dev", "development", "")
+_docs_enabled = _is_dev
+
 app = FastAPI(
     title="ZongziBay",
     version=get_version(),
-    docs_url="/docs",       # Swagger UI 文档地址
-    redoc_url="/redoc",     # ReDoc 文档地址
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
     lifespan=lifespan
 )
 

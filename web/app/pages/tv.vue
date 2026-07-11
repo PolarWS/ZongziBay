@@ -10,6 +10,8 @@ import AppPagination from '@/components/AppPagination.vue'
 const route = useRoute()
 const router = useRouter()
 
+const { imgBase, loadImageDomain } = useTmdbImage()
+
 // 响应式状态：搜索来源、分页与列表
 const searchSource = ref<'piratebay' | 'anime' | 'assrt'>('piratebay')
 const page = ref(Number(route.query.page) || 1)
@@ -17,9 +19,6 @@ const loading = ref(false)
 const items = ref<API.TMDBTV[]>([])
 const total = ref(0)
 const itemsPerPage = 20
-
-// TMDB 海报基础 URL
-const imgBase = 'https://image.tmdb.org/t/p/w300'
 
 // 从路由与列表派生的计算属性
 const q = computed(() => (route.query.q as string) || '')
@@ -39,6 +38,7 @@ watch(() => page.value, () => {
 
 // 挂载时根据当前关键词拉取剧集列表
 onMounted(() => {
+  loadImageDomain()
   fetchData()
 })
 

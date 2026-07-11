@@ -16,6 +16,8 @@ import AppPagination from '@/components/AppPagination.vue'
 const route = useRoute()
 const router = useRouter()
 
+const { imgBase, loadImageDomain } = useTmdbImage()
+
 const LIST_KINDS = ['trending_week', 'trending_day', 'popular', 'top_rated'] as const
 const isValidList = (v: string): v is (typeof LIST_KINDS)[number] =>
   LIST_KINDS.includes(v as (typeof LIST_KINDS)[number])
@@ -55,8 +57,6 @@ const loading = ref(false)
 const items = ref<(API.TMDBMovie | API.TMDBTV)[]>([])
 const total = ref(0)
 const itemsPerPage = 20
-
-const imgBase = 'https://image.tmdb.org/t/p/w300'
 
 // 电影：原始名 / 中文名
 const getMovieOriginal = (it: API.TMDBMovie) =>
@@ -208,6 +208,7 @@ watch(() => page.value, () => {
 onMounted(() => {
   const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(DEFAULT_SEARCH_SOURCE_KEY) : null
   if (saved === 'piratebay' || saved === 'anime' || saved === 'assrt') searchSource.value = saved
+  loadImageDomain()
   initFromRoute()
   syncRoute()
   fetchList()

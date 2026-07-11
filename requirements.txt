@@ -4,7 +4,7 @@ uvicorn
 PyYAML
 python-multipart
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt>=4.0,<5
 tmdbv3api
 
 # 测试（FastAPI TestClient 依赖 httpx；固定版本避免 CI 与本地行为不一致）

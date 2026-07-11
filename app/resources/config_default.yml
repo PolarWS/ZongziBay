@@ -9,13 +9,16 @@ security:
   password: password123                # 系统登录密码
   secret_key: "CHANGE_THIS_SECRET_KEY" # JWT 签名密钥，生产环境请务必修改此值以保证安全
   algorithm: "HS256"                   # JWT 加密算法
-  access_token_expire_minutes: 1440      # Token 过期时间（分钟）
+  access_token_expire_minutes: 1440    # Access Token 过期时间（分钟）
+  refresh_token_expire_days: 7         # Refresh Token 过期时间（天）
 
 # TMDB (The Movie Database) 配置
 # 用于获取电影/电视剧的元数据（海报、简介等）
 tmdb:
   api_key: "YOUR_TMDB_API_KEY"         # TMDB API Key，需从 TMDB 官网申请
   language: "zh-CN"                    # 元数据语言，默认简体中文
+  api_domain: "https://api.themoviedb.org"     # TMDB API 地址，可配置为中转代理以加速访问
+  image_domain: "https://image.tmdb.org"       # TMDB 图片地址，可配置为中转代理以加速图片加载
 
 # qBittorrent 下载器配置
 # 用于管理种子下载任务，需确保 qBittorrent 已开启 WebUI
@@ -23,6 +26,7 @@ qbittorrent:
   host: "http://localhost:8080"        # qBittorrent WebUI 地址
   username: "admin"                    # qBittorrent 用户名
   password: "admin"                    # qBittorrent 密码
+  api_key: ""                          # (可选) qBittorrent 5.2.0+ 的 API Key，若填写则优先使用，无需用户名密码
   
   # 文件处理配置
   file_handling:
@@ -125,3 +129,8 @@ trackers:
   - "udp://tracker.theoks.net:6969/announce"
   - "udp://tracker.novg.net:6969/announce"
   - "udp://tracker.4.babico.org:6969/announce"
+
+# 显示偏好配置
+# 注意：此节通过 Docker 环境变量注入映射为 ZONGZI_DISPLAY_SHOW_ZONGZIBAY_CHAN
+display:
+  show_zongzibay_chan: true            # 是否在页面右下角显示粽子娘角色图片

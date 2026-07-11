@@ -39,8 +39,16 @@ class TMDBService:
 
     def reload_config(self) -> None:
         """从当前运行时配置刷新 TMDB 客户端参数（设置页保存后可立即生效）。"""
-        self.tmdb.api_key = config.get("tmdb.api_key")
+        self.tmdb.api_key = config.get("tmdb.api_key") or ""
         self.tmdb.language = config.get("tmdb.language", "zh-CN")
+        api_domain = (config.get("tmdb.api_domain", "https://api.themoviedb.org") or "https://api.themoviedb.org").strip()
+        # 兼容旧配置：去掉误填的 http(s):// 前缀和末尾 /
+        if api_domain.startswith("https://"):
+            api_domain = api_domain[8:]
+        elif api_domain.startswith("http://"):
+            api_domain = api_domain[7:]
+        api_domain = api_domain.rstrip("/")
+        self.tmdb._base = f"https://{api_domain}/3"
 
     @staticmethod
     def _extract_results(raw) -> List[Any]:

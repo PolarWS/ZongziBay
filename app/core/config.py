@@ -173,9 +173,34 @@ class Config:
                 logger.error(f"写入配置文件失败: {e}")
 
         base_config.pop("database", None)
+
+        # 启动时自动将明文密码升级为 bcrypt 哈希
+        self._migrate_password_if_needed(base_config, target_config_path)
+
         self._file_config = copy.deepcopy(base_config)
         self._override_from_env(base_config)
         self._config = base_config
+
+    def _migrate_password_if_needed(self, base_config: dict, config_path: str) -> None:
+        """如果配置中的密码是明文，自动升级为 bcrypt 哈希并写回配置文件"""
+        security = base_config.get("security") or {}
+        pwd = security.get("password")
+        if not pwd or not isinstance(pwd, str):
+            return
+        # 已经是 bcrypt 哈希，无需升级
+        if pwd.startswith("$2b$") or pwd.startswith("$2a$"):
+            return
+        try:
+            import bcrypt
+            # bcrypt 最多处理 72 字节
+            raw = pwd.encode("utf-8")[:72]
+            hashed = bcrypt.hashpw(raw, bcrypt.gensalt(rounds=12)).decode("utf-8")
+            security["password"] = hashed
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(base_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+            logger.info("密码已从明文自动升级为 bcrypt 哈希")
+        except Exception:
+            logger.warning("密码哈希自动升级失败，将在下次登录时重试", exc_info=True)
 
     def get(self, key: str, default: Any = None) -> Any:
         """

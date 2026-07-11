@@ -3,12 +3,20 @@ import { assrtQuota } from '@/api/assrt'
 import { animeGardenTeams } from '@/api/animeGarden'
 import { checkConnectionApiV1MagnetCheckGet } from '@/api/magnet'
 import { searchTorrentsApiV1PiratebaySearchGet } from '@/api/pirateBay'
-import { getConfigApiV1SystemConfigGet, saveConfigApiV1SystemConfigPut } from '@/api/system'
+import { getConfigApiV1SystemConfigGet, saveConfigApiV1SystemConfigPut, applyDefaultTmdbKeyApiV1SystemConfigApplyDefaultTmdbKeyPost, applyDefaultAssrtKeyApiV1SystemConfigApplyDefaultAssrtKeyPost } from '@/api/system'
 import { getTrendingMoviesApiV1TmdbTrendingMovieGet } from '@/api/tmdb'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import Checkbox from '@/components/ui/checkbox/Checkbox.vue'
-import { Palette, Info, FileJson, Shield, Clapperboard, DownloadCloud, Server, HardDrive, Wand2, Link2 } from 'lucide-vue-next'
+import { Palette, Info, FileJson, Shield, Clapperboard, DownloadCloud, Server, HardDrive, Wand2, Link2, CheckCircle, XCircle, Loader, RefreshCw, ArrowUpCircle } from 'lucide-vue-next'
+import pkg from '../../package.json'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { toast } from 'vue-sonner'
 
 // --- 本地偏好 key ---
@@ -33,18 +41,110 @@ const testing = reactive({
   all: false,
 })
 
+// 测试结果：null=未测试, true=通过(✓), false=失败(✗)
+const testResults = reactive<Record<string, null | boolean>>({
+  tmdb: null,
+  piratebay: null,
+  animeGarden: null,
+  assrt: null,
+  qb: null,
+})
+
+// 默认密钥应用状态
+const applyingDefaults = reactive({
+  tmdb: false,
+  assrt: false,
+})
+const showDefaultKeyDialog = ref(false)
+const defaultKeyTarget = ref<'tmdb' | 'assrt'>('tmdb')
+const MASKED = '****'
+
+// --- 版本更新检测 ---
+const currentVersion = pkg.version
+const checkingUpdate = ref(false)
+const latestVersion = ref<string | null>(null)
+const updateChecked = ref(false)
+
+const hasUpdate = computed(() => {
+  if (!latestVersion.value) return false
+  return latestVersion.value !== currentVersion
+})
+
+const checkUpdate = async () => {
+  checkingUpdate.value = true
+  updateChecked.value = false
+  try {
+    const res = await fetch('https://raw.githubusercontent.com/PolarWS/ZongziBay/main/VERSION', {
+      cache: 'no-cache',
+    })
+    if (!res.ok) throw new Error('获取版本信息失败')
+    const text = await res.text()
+    latestVersion.value = text.trim()
+    updateChecked.value = true
+  } catch (e: any) {
+    toast.error(e?.message || '检查更新失败')
+  } finally {
+    checkingUpdate.value = false
+  }
+}
+
+const confirmApplyDefaultKeys = async () => {
+  const target = defaultKeyTarget.value
+  if (target === 'tmdb') applyingDefaults.tmdb = true
+  else applyingDefaults.assrt = true
+  showDefaultKeyDialog.value = false
+  try {
+    if (target === 'tmdb') {
+      await applyDefaultTmdbKeyApiV1SystemConfigApplyDefaultTmdbKeyPost()
+      toast.success('TMDB 默认密钥已应用')
+    } else {
+      await applyDefaultAssrtKeyApiV1SystemConfigApplyDefaultAssrtKeyPost()
+      toast.success('ASSRT 默认密钥已应用')
+    }
+    await loadConfig()
+  } catch (e: any) {
+    toast.error(e?.message || '应用默认密钥失败')
+  } finally {
+    if (target === 'tmdb') applyingDefaults.tmdb = false
+    else applyingDefaults.assrt = false
+  }
+}
+
+const applyDefaultTmdbKey = () => {
+  defaultKeyTarget.value = 'tmdb'
+  showDefaultKeyDialog.value = true
+}
+
+const applyDefaultAssrtKey = () => {
+  defaultKeyTarget.value = 'assrt'
+  showDefaultKeyDialog.value = true
+}
+
 const securityUsername = ref('')
 const securityPassword = ref('')
 const securitySecretKey = ref('')
 const securityAlgorithm = ref('')
 const securityAccessTokenExpireMinutes = ref<number | null>(null)
 
+function generateSecuritySecretKey() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  let key = ''
+  for (let i = 0; i < 32; i++) {
+    key += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  securitySecretKey.value = key
+  toast.success('JWT 密钥已随机生成')
+}
+
 const tmdbApiKey = ref('')
 const tmdbLanguage = ref('')
+const tmdbApiDomain = ref('')
+const tmdbImageDomain = ref('')
 
 const qbHost = ref('')
 const qbUsername = ref('')
 const qbPassword = ref('')
+const qbApiKey = ref('')
 const qbUseCopy = ref(false)
 const qbCopyDeleteOnComplete = ref(false)
 const qbSeedingLimitRatio = ref<number | null>(null)
@@ -92,11 +192,14 @@ const applyConfigToForm = (cfg: Record<string, any>) => {
   const tmdb = cfg.tmdb || {}
   tmdbApiKey.value = tmdb.api_key ?? ''
   tmdbLanguage.value = tmdb.language ?? ''
+  tmdbApiDomain.value = tmdb.api_domain ?? ''
+  tmdbImageDomain.value = tmdb.image_domain ?? ''
 
   const qb = cfg.qbittorrent || {}
   qbHost.value = qb.host ?? ''
   qbUsername.value = qb.username ?? ''
   qbPassword.value = qb.password ?? ''
+  qbApiKey.value = qb.api_key ?? ''
   const fileHandling = qb.file_handling || {}
   qbUseCopy.value = fileHandling.use_copy ?? false
   qbCopyDeleteOnComplete.value = fileHandling.copy_delete_on_complete ?? false
@@ -168,14 +271,32 @@ const saveConfig = async () => {
     cfg.security.access_token_expire_minutes = securityAccessTokenExpireMinutes.value
   }
 
+  // JWT 密钥不允许为空或太短
+  const finalSecretKey = cfg.security.secret_key !== '****' ? cfg.security.secret_key : (originalConfig.value?.security?.secret_key || '')
+  if (!finalSecretKey || finalSecretKey === 'CHANGE_THIS_SECRET_KEY') {
+    toast.error('JWT 密钥不能为空或使用默认值，请设置一个安全密钥')
+    return
+  }
+  if (finalSecretKey !== '****' && finalSecretKey.length < 16) {
+    toast.error('JWT 密钥长度至少 16 个字符，请重新生成')
+    return
+  }
+  if (cfg.security.secret_key === '****') {
+    // 用户未修改，保留原值，不传入空串
+    delete cfg.security.secret_key
+  }
+
   cfg.tmdb = cfg.tmdb || {}
   cfg.tmdb.api_key = tmdbApiKey.value
   cfg.tmdb.language = tmdbLanguage.value
+  cfg.tmdb.api_domain = tmdbApiDomain.value
+  cfg.tmdb.image_domain = tmdbImageDomain.value
 
   cfg.qbittorrent = cfg.qbittorrent || {}
   cfg.qbittorrent.host = qbHost.value
   cfg.qbittorrent.username = qbUsername.value
   cfg.qbittorrent.password = qbPassword.value
+  cfg.qbittorrent.api_key = qbApiKey.value
   cfg.qbittorrent.file_handling = cfg.qbittorrent.file_handling || {}
   cfg.qbittorrent.file_handling.use_copy = qbUseCopy.value
   cfg.qbittorrent.file_handling.copy_delete_on_complete = qbCopyDeleteOnComplete.value
@@ -239,13 +360,16 @@ const saveConfig = async () => {
 
 const testTmdb = async () => {
   testing.tmdb = true
+  testResults.tmdb = null
   try {
     const res = await getTrendingMoviesApiV1TmdbTrendingMovieGet({ page: 1, window: 'week' })
     const data = (res as any)?.data
     const items = data?.results || data?.items || data?.data?.results || []
     toast.success(`TMDB 连接正常${Array.isArray(items) ? `（返回 ${items.length} 条）` : ''}`)
+    testResults.tmdb = true
   } catch (e: any) {
     toast.error(e?.message || 'TMDB 连接失败')
+    testResults.tmdb = false
   } finally {
     testing.tmdb = false
   }
@@ -253,13 +377,16 @@ const testTmdb = async () => {
 
 const testPirateBay = async () => {
   testing.piratebay = true
+  testResults.piratebay = null
   try {
     const res = await searchTorrentsApiV1PiratebaySearchGet({ q: 'test' })
     const data = (res as any)?.data
     const list = data?.data ?? data ?? []
     toast.success(`海盗湾连接正常${Array.isArray(list) ? `（返回 ${list.length} 条）` : ''}`)
+    testResults.piratebay = true
   } catch (e: any) {
     toast.error(e?.message || '海盗湾连接失败')
+    testResults.piratebay = false
   } finally {
     testing.piratebay = false
   }
@@ -267,13 +394,16 @@ const testPirateBay = async () => {
 
 const testAnimeGarden = async () => {
   testing.animeGarden = true
+  testResults.animeGarden = null
   try {
     const res = await animeGardenTeams()
     const data = (res as any)?.data
     const list = data?.data ?? data ?? []
     toast.success(`动漫花园连接正常${Array.isArray(list) ? `（返回 ${list.length} 条字幕组）` : ''}`)
+    testResults.animeGarden = true
   } catch (e: any) {
     toast.error(e?.message || '动漫花园连接失败')
+    testResults.animeGarden = false
   } finally {
     testing.animeGarden = false
   }
@@ -281,13 +411,16 @@ const testAnimeGarden = async () => {
 
 const testAssrt = async () => {
   testing.assrt = true
+  testResults.assrt = null
   try {
     const res = await assrtQuota()
     const data = (res as any)?.data
     const quota = data?.data?.quota ?? data?.quota
     toast.success(`ASSRT 连接正常${quota != null ? `（配额 ${quota}）` : ''}`)
+    testResults.assrt = true
   } catch (e: any) {
     toast.error(e?.message || 'ASSRT 连接失败')
+    testResults.assrt = false
   } finally {
     testing.assrt = false
   }
@@ -295,14 +428,21 @@ const testAssrt = async () => {
 
 const testQb = async () => {
   testing.qb = true
+  testResults.qb = null
   try {
     const res = await checkConnectionApiV1MagnetCheckGet()
     const data = (res as any)?.data
     const ok = data?.data ?? data
-    if (ok) toast.success('qBittorrent 连接正常')
-    else toast.error('qBittorrent 连接失败（请检查 host/账号密码/网络）')
+    if (ok) {
+      toast.success('qBittorrent 连接正常')
+      testResults.qb = true
+    } else {
+      toast.error('qBittorrent 连接失败（请检查 host/账号密码/网络）')
+      testResults.qb = false
+    }
   } catch (e: any) {
     toast.error(e?.message || 'qBittorrent 连接失败')
+    testResults.qb = false
   } finally {
     testing.qb = false
   }
@@ -336,6 +476,7 @@ const onKeydownSaveConfig = (e: KeyboardEvent) => {
 const theme = ref<Theme>('system')
 const defaultSearchSource = ref<SearchSource>('piratebay')
 const defaultType = ref<DefaultType>('tv')
+const { showZongzibayChan, init: initChan, setShowChan } = useZongzibayChan()
 
 const applyTheme = (v: Theme) => {
   const root = document.documentElement
@@ -366,7 +507,8 @@ const setDefaultType = (v: DefaultType) => {
   if (typeof localStorage !== 'undefined') localStorage.setItem(DEFAULT_TYPE_KEY, v)
 }
 
-onMounted(() => {
+
+onMounted(async () => {
   if (typeof localStorage === 'undefined') return
   const t = localStorage.getItem(THEME_KEY) as Theme | null
   if (t && ['light', 'dark', 'system'].includes(t)) {
@@ -380,6 +522,7 @@ onMounted(() => {
   const d = localStorage.getItem(DEFAULT_TYPE_KEY) as DefaultType | null
   if (d && (d === 'movie' || d === 'tv')) defaultType.value = d
 
+  initChan()
   loadConfig()
 
   // 快捷键：Ctrl+S / Cmd+S 保存配置
@@ -487,6 +630,25 @@ onUnmounted(() => {
             </Button>
           </div>
         </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <Label class="text-sm">显示粽子娘</Label>
+              <p class="text-xs text-muted-foreground mt-0.5">关闭后登录页、引导页及主页面右下角的粽子娘角色图片将被隐藏</p>
+            </div>
+            <button
+              type="button"
+              class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200"
+              :class="showZongzibayChan ? 'bg-primary' : 'bg-muted-foreground/30'"
+              @click="setShowChan(!showZongzibayChan)"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform transition-transform duration-200"
+                :class="showZongzibayChan ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -508,22 +670,38 @@ onUnmounted(() => {
             :disabled="testing.all || loadingConfig"
             @click="testAllConnections"
           >
+            <Loader v-if="testing.all" class="mr-1 h-3 w-3 animate-spin" />
             {{ testing.all ? '测试中…' : '测试全部' }}
           </Button>
           <Button size="sm" variant="secondary" :disabled="testing.tmdb" @click="testTmdb">
-            {{ testing.tmdb ? 'TMDB…' : 'TMDB' }}
+            <Loader v-if="testing.tmdb" class="mr-1 h-3 w-3 animate-spin" />
+            TMDB
+            <CheckCircle v-if="testResults.tmdb === true" class="ml-1 h-3.5 w-3.5 text-green-500" />
+            <XCircle v-if="testResults.tmdb === false" class="ml-1 h-3.5 w-3.5 text-red-500" />
           </Button>
           <Button size="sm" variant="secondary" :disabled="testing.piratebay" @click="testPirateBay">
-            {{ testing.piratebay ? '海盗湾…' : '海盗湾' }}
+            <Loader v-if="testing.piratebay" class="mr-1 h-3 w-3 animate-spin" />
+            海盗湾
+            <CheckCircle v-if="testResults.piratebay === true" class="ml-1 h-3.5 w-3.5 text-green-500" />
+            <XCircle v-if="testResults.piratebay === false" class="ml-1 h-3.5 w-3.5 text-red-500" />
           </Button>
           <Button size="sm" variant="secondary" :disabled="testing.animeGarden" @click="testAnimeGarden">
-            {{ testing.animeGarden ? '动漫花园…' : '动漫花园' }}
+            <Loader v-if="testing.animeGarden" class="mr-1 h-3 w-3 animate-spin" />
+            动漫花园
+            <CheckCircle v-if="testResults.animeGarden === true" class="ml-1 h-3.5 w-3.5 text-green-500" />
+            <XCircle v-if="testResults.animeGarden === false" class="ml-1 h-3.5 w-3.5 text-red-500" />
           </Button>
           <Button size="sm" variant="secondary" :disabled="testing.assrt" @click="testAssrt">
-            {{ testing.assrt ? 'ASSRT…' : 'ASSRT' }}
+            <Loader v-if="testing.assrt" class="mr-1 h-3 w-3 animate-spin" />
+            ASSRT
+            <CheckCircle v-if="testResults.assrt === true" class="ml-1 h-3.5 w-3.5 text-green-500" />
+            <XCircle v-if="testResults.assrt === false" class="ml-1 h-3.5 w-3.5 text-red-500" />
           </Button>
           <Button size="sm" variant="secondary" :disabled="testing.qb" @click="testQb">
-            {{ testing.qb ? 'qB…' : 'qBittorrent' }}
+            <Loader v-if="testing.qb" class="mr-1 h-3 w-3 animate-spin" />
+            qBittorrent
+            <CheckCircle v-if="testResults.qb === true" class="ml-1 h-3.5 w-3.5 text-green-500" />
+            <XCircle v-if="testResults.qb === false" class="ml-1 h-3.5 w-3.5 text-red-500" />
           </Button>
         </div>
 
@@ -554,10 +732,15 @@ onUnmounted(() => {
             </div>
             <div class="space-y-1 sm:col-span-2">
               <Label>JWT 密钥</Label>
-              <input
-                v-model="securitySecretKey"
-                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
+              <div class="flex gap-2">
+                <input
+                  v-model="securitySecretKey"
+                  class="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <Button size="sm" variant="outline" class="shrink-0" @click="generateSecuritySecretKey">
+                  <RefreshCw class="w-3.5 h-3.5 mr-1" />随机生成
+                </Button>
+              </div>
             </div>
             <div class="space-y-1">
               <Label>算法</Label>
@@ -589,10 +772,24 @@ onUnmounted(() => {
           <div class="grid gap-4 sm:grid-cols-2">
             <div class="space-y-1 sm:col-span-2">
               <Label>API Key</Label>
-              <input
-                v-model="tmdbApiKey"
-                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
+              <div class="flex gap-2">
+                <input
+                  v-model="tmdbApiKey"
+                  class="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  class="shrink-0"
+                  :disabled="applyingDefaults.tmdb || applyingDefaults.assrt"
+                  @click="applyDefaultTmdbKey"
+                >
+                  {{ applyingDefaults.tmdb ? '应用中…' : '使用项目默认密钥' }}
+                </Button>
+              </div>
+              <p v-if="tmdbApiKey === MASKED" class="text-xs text-emerald-500">
+                已使用项目提供的默认密钥，你也可以替换为自己的 API Key
+              </p>
             </div>
             <div class="space-y-1">
               <Label>语言</Label>
@@ -600,6 +797,25 @@ onUnmounted(() => {
                 v-model="tmdbLanguage"
                 class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
+            </div>
+            <div class="space-y-1">
+              <Label>API 域名</Label>
+              <input
+                v-model="tmdbApiDomain"
+                placeholder="api.themoviedb.org"
+                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <div class="space-y-1 sm:col-span-2">
+              <Label>图片域名</Label>
+              <input
+                v-model="tmdbImageDomain"
+                placeholder="image.tmdb.org"
+                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p class="text-xs text-muted-foreground">
+                若图片加载缓慢可更换为中转代理地址
+              </p>
             </div>
           </div>
         </div>
@@ -633,6 +849,15 @@ onUnmounted(() => {
               <input
                 v-model="qbPassword"
                 type="password"
+                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <div class="space-y-1">
+              <Label>API Key（5.2.0+ 可选，填写后无需用户名密码）</Label>
+              <input
+                v-model="qbApiKey"
+                type="password"
+                placeholder="qbt_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                 class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
@@ -717,10 +942,24 @@ onUnmounted(() => {
             </div>
             <div class="space-y-1 sm:col-span-2">
               <Label>ASSRT Token</Label>
-              <input
-                v-model="assrtToken"
-                class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
+              <div class="flex gap-2">
+                <input
+                  v-model="assrtToken"
+                  class="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  class="shrink-0"
+                  :disabled="applyingDefaults.assrt || applyingDefaults.tmdb"
+                  @click="applyDefaultAssrtKey"
+                >
+                  {{ applyingDefaults.assrt ? '应用中…' : '使用项目默认密钥' }}
+                </Button>
+              </div>
+              <p v-if="assrtToken === MASKED" class="text-xs text-emerald-500">
+                已使用项目提供的默认令牌，你也可以替换为自己的 Token
+              </p>
             </div>
             <div class="space-y-1 sm:col-span-2">
               <Label>ASSRT Base URL</Label>
@@ -912,9 +1151,70 @@ onUnmounted(() => {
         <Info class="h-5 w-5" />
         <h2 class="text-lg font-medium text-foreground">关于</h2>
       </div>
-      <div class="pl-8 space-y-2 text-sm text-muted-foreground">
+      <div class="pl-8 space-y-3 text-sm text-muted-foreground">
         <p>粽子湾资源助手 — 聚合磁链搜索、qBittorrent 推送与智能重命名。</p>
+        <div class="flex items-center gap-3 flex-wrap">
+          <span>
+            当前版本：
+            <code class="rounded bg-muted px-1.5 py-0.5 text-xs">{{ currentVersion }}</code>
+          </span>
+          <Button size="sm" variant="outline" :disabled="checkingUpdate" @click="checkUpdate">
+            <Loader v-if="checkingUpdate" class="mr-1 h-3 w-3 animate-spin" />
+            <RefreshCw v-else class="mr-1 h-3 w-3" />
+            {{ checkingUpdate ? '检测中…' : '检查更新' }}
+          </Button>
+        </div>
+        <div v-if="updateChecked && latestVersion" class="flex items-center gap-2">
+          <template v-if="hasUpdate">
+            <ArrowUpCircle class="h-4 w-4 shrink-0 text-orange-500" />
+            <span class="text-orange-500">
+              发现新版本 <code class="rounded bg-muted px-1 py-0.5 text-xs">{{ latestVersion }}</code>，请前往
+              <a href="https://github.com/PolarWS/ZongziBay/releases" target="_blank" class="text-primary underline">GitHub Releases</a>
+              下载更新。
+            </span>
+          </template>
+          <template v-else>
+            <CheckCircle class="h-4 w-4 shrink-0 text-green-500" />
+            <span class="text-green-500">已是最新版本</span>
+          </template>
+        </div>
       </div>
     </section>
   </div>
+
+  <!-- 默认密钥确认对话框 -->
+  <Dialog v-model:open="showDefaultKeyDialog">
+    <DialogContent class="max-w-md w-[calc(100vw-1rem)] sm:w-full">
+      <DialogHeader>
+        <DialogTitle>使用项目默认密钥</DialogTitle>
+        <DialogDescription class="space-y-3 text-left">
+          <p>
+            项目提供的
+            <strong class="text-foreground">{{ defaultKeyTarget === 'tmdb' ? 'TMDB' : 'ASSRT' }}</strong>
+            密钥为公共密钥，<strong class="text-foreground">请求速率有严格限制</strong>，多人共用时可能触发限流导致
+            {{ defaultKeyTarget === 'tmdb' ? '元数据获取' : '字幕搜索' }}失败。
+          </p>
+          <p>
+            建议前往对应官网<strong class="text-foreground">免费申请自己的密钥</strong>以获得更稳定的体验：
+          </p>
+          <ul class="list-disc list-inside space-y-1 text-xs">
+            <li>TMDB：<a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" class="text-primary underline">themoviedb.org/settings/api</a></li>
+            <li>ASSRT：<a href="https://assrt.net/user" target="_blank" rel="noopener noreferrer" class="text-primary underline">assrt.net/user</a>（注册后在用户面板查看 Token）</li>
+          </ul>
+          <p class="text-xs">
+            详细图文教程请参阅：<a href="https://github.com/PolarWS/ZongziBay/blob/main/docs/api_keys_guide.md" target="_blank" rel="noopener noreferrer" class="text-primary underline">API Key 获取指南</a>
+          </p>
+          <p class="pt-1">是否确认使用项目默认的 <strong class="text-foreground">{{ defaultKeyTarget === 'tmdb' ? 'TMDB' : 'ASSRT' }}</strong> 密钥？你也可以稍后自行填写自己的密钥。</p>
+        </DialogDescription>
+      </DialogHeader>
+      <div class="flex justify-end gap-3 mt-4">
+        <Button variant="outline" :disabled="applyingDefaults.tmdb || applyingDefaults.assrt" @click="showDefaultKeyDialog = false">
+          我再想想
+        </Button>
+        <Button :disabled="applyingDefaults.tmdb || applyingDefaults.assrt" @click="confirmApplyDefaultKeys">
+          {{ (defaultKeyTarget === 'tmdb' ? applyingDefaults.tmdb : applyingDefaults.assrt) ? '应用中…' : '确认使用' }}
+        </Button>
+      </div>
+    </DialogContent>
+  </Dialog>
 </template>
