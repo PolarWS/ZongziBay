@@ -75,15 +75,16 @@ python -m pytest tests/ -v
 
 ---
 
-## 数据来源
+## 数据来源和友链
 
-本项目的搜索与字幕能力依赖以下第三方服务，感谢其开放接口与社区贡献：
+本项目的搜索与字幕能力依赖以下第三方服务以及社区支持，感谢其开放接口与社区贡献：
 
 | 用途 | 名称 | 链接 |
 |------|------|------|
 | 动漫资源搜索 | 动漫花园 (Anime Garden) | [GitHub](https://github.com/animegarden) · [镜像站](https://animes.garden/) |
 | 电影/剧集种子搜索 | 海盗湾 (The Pirate Bay) | [thepiratebay.org](https://thepiratebay.org/) |
 | 字幕搜索与下载 | 射手网(伪) (Assrt) | [assrt.net](https://assrt.net/) |
+| 社区支持 | LinuxDo | [linux.do](https://linux.do/) |
 
 ---
 
