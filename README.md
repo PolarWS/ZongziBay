@@ -84,7 +84,7 @@ python -m pytest tests/ -v
 | 动漫资源搜索 | 动漫花园 (Anime Garden) | [GitHub](https://github.com/animegarden) · [镜像站](https://animes.garden/) |
 | 电影/剧集种子搜索 | 海盗湾 (The Pirate Bay) | [thepiratebay.org](https://thepiratebay.org/) |
 | 字幕搜索与下载 | 射手网(伪) (Assrt) | [assrt.net](https://assrt.net/) |
-| linuxdo | LinuxDo社区 | [linux.do](https://linux.do/) |
+| 社区支持 | LinuxDo | [linux.do](https://linux.do/) |
 
 ---
 
