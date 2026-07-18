@@ -1,6 +1,6 @@
 export const DownloadTaskStatusMap: Record<string, string> = {
-  fetching_metadata: '获取下载信息',
-  fetching_metadata_failed: '获取信息失败',
+  fetching_metadata: '推送中',
+  fetching_metadata_failed: '推送失败',
   downloading: '下载中',
   pending_download: '待下载',
   moving: '移动中',

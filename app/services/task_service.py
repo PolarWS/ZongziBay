@@ -135,7 +135,7 @@ class TaskService:
                 db.insert_notification(title="添加任务成功", content=f"任务 {request.taskName} 已开始下载", type=NotificationType.SUCCESS.value)
             else:
                 logger.info(f"[TaskService] 任务已创建 (fetching_metadata): task_id={task_id}，等待 task_monitor 推送到 qB")
-                db.insert_notification(title="任务已创建", content=f"任务 {request.taskName} 正在获取下载信息…", type=NotificationType.INFO.value)
+                db.insert_notification(title="任务已创建", content=f"任务 {request.taskName} 正在推送到 qB…", type=NotificationType.INFO.value)
             return task_id
 
         except Exception as e:

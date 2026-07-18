@@ -128,11 +128,11 @@ class TaskMonitor:
                                 created = datetime.strptime(task.get('createTime', ''), '%Y-%m-%d %H:%M:%S')
                                 elapsed = (datetime.now() - created).total_seconds()
                                 if elapsed > 300:  # 5 分钟超时
-                                    logger.warning(f"任务 {task['id']} 获取下载信息超时 ({elapsed:.0f}s)，标记为失败")
+                                    logger.warning(f"任务 {task['id']} 推送超时 ({elapsed:.0f}s)，标记为失败")
                                     db.update_task_status(task['id'], 'fetching_metadata_failed')
                                     db.insert_notification(
-                                        title="获取下载信息失败",
-                                        content=f"任务 {task['taskName']} 获取下载信息超时，请检查 qBittorrent 连接",
+                                        title="推送失败",
+                                        content=f"任务 {task['taskName']} 推送超时，请检查 qBittorrent 连接",
                                         type=NotificationType.ERROR.value,
                                     )
                                     continue
@@ -152,8 +152,8 @@ class TaskMonitor:
                             )
                             if success:
                                 db.insert_notification(
-                                    title="任务已推送" if task['taskStatus'] == 'fetching_metadata' else "任务已自动重推",
-                                    content=f"任务 {task['taskName']} 已{'推送到 qB，开始获取下载信息' if task['taskStatus'] == 'fetching_metadata' else '自动重推下载'}",
+                                    title="推送成功" if task['taskStatus'] == 'fetching_metadata' else "任务已自动重推",
+                                    content=f"任务 {task['taskName']} 已推送至 qB" if task['taskStatus'] == 'fetching_metadata' else f"任务 {task['taskName']} 已自动重推下载",
                                     type=NotificationType.INFO.value if task['taskStatus'] == 'fetching_metadata' else NotificationType.WARNING.value
                                 )
                                 continue
