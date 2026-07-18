@@ -9,7 +9,7 @@ export async function getMovieDetailApiV1TmdbMovieMovieIdGet(
   options?: { [key: string]: any }
 ) {
   const { movie_id: param0, ...queryParams } = params;
-  return request<API.BaseResponseTMDBMovie_>(`/api/v1/tmdb/movie/${param0}`, {
+  return request<API.BaseResponseTMDBMovieDetail_>(`/api/v1/tmdb/movie/${param0}`, {
     method: "GET",
     params: { ...queryParams },
     ...(options || {}),
@@ -139,6 +139,17 @@ export async function getTopRatedTvApiV1TmdbTopRatedTvGet(
   );
 }
 
+/** 高分番剧 GET /api/v1/tmdb/list/top_rated/anime */
+export async function getTopRatedAnimeApiV1TmdbTopRatedAnimeGet(
+  params?: { page?: number },
+  options?: { [key: string]: any }
+) {
+  return request<API.BaseResponseTMDBTVListResponse_>(
+    "/api/v1/tmdb/list/top_rated/anime",
+    { method: "GET", params: { page: 1, ...params }, ...(options || {}) }
+  );
+}
+
 /** 搜索提示补全 根据输入返回搜索建议（标题补全） GET /api/v1/tmdb/suggestions */
 export async function getSuggestionsApiV1TmdbSuggestionsGet(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
@@ -166,7 +177,7 @@ export async function getTvDetailApiV1TmdbTvTvIdGet(
   options?: { [key: string]: any }
 ) {
   const { tv_id: param0, ...queryParams } = params;
-  return request<API.BaseResponseTMDBTV_>(`/api/v1/tmdb/tv/${param0}`, {
+  return request<API.BaseResponseTMDBTVDetail_>(`/api/v1/tmdb/tv/${param0}`, {
     method: "GET",
     params: { ...queryParams },
     ...(options || {}),

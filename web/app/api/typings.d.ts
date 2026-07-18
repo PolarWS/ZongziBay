@@ -25,6 +25,72 @@ declare namespace API {
     avatar?: string | null;
   };
 
+  type BangumiWeekday = {
+    id?: number | null;
+    cn?: string | null;
+    en?: string | null;
+    ja?: string | null;
+  };
+
+  type BangumiCalendarItem = {
+    id?: number | null;
+    name?: string | null;
+    name_cn?: string | null;
+    air_date?: string | null;
+    air_weekday?: number | null;
+    image?: string | null;
+    score?: number | null;
+    rating_total?: number | null;
+    rank?: number | null;
+    doing?: number | null;
+    url?: string | null;
+    summary?: string | null;
+  };
+
+  type BangumiCalendarDay = {
+    weekday: BangumiWeekday;
+    items: BangumiCalendarItem[];
+  };
+
+  type BaseResponseListBangumiCalendarDay_ = {
+    /** Code */
+    code?: number;
+    /** Message */
+    message?: string;
+    /** Data */
+    data?: BangumiCalendarDay[] | null;
+  };
+
+  type BangumiTag = {
+    name?: string | null;
+    count?: number | null;
+  };
+
+  type BangumiSubjectDetail = {
+    id?: number | null;
+    name?: string | null;
+    name_cn?: string | null;
+    summary?: string | null;
+    date?: string | null;
+    platform?: string | null;
+    eps?: number | null;
+    total_episodes?: number | null;
+    image?: string | null;
+    score?: number | null;
+    rating_total?: number | null;
+    rank?: number | null;
+    tags?: BangumiTag[];
+    url?: string | null;
+  };
+
+  type BaseResponseBangumiSubjectDetail_ = {
+    /** Code */
+    code?: number;
+    /** Message */
+    message?: string;
+    data?: BangumiSubjectDetail | null;
+  };
+
   type AnimeGardenPagination = {
     /** Page */
     page: number;
@@ -598,6 +664,138 @@ declare namespace API {
     original_title?: string | null;
     /** Release Date */
     release_date?: string | null;
+  };
+
+  type TMDBGenre = {
+    /** Id */
+    id?: number | null;
+    /** Name */
+    name?: string | null;
+  };
+
+  type TMDBCountry = {
+    /** Iso 3166 1 */
+    iso_3166_1?: string | null;
+    /** Name */
+    name?: string | null;
+  };
+
+  type TMDBSpokenLanguage = {
+    /** Iso 639 1 */
+    iso_639_1?: string | null;
+    /** Name */
+    name?: string | null;
+    /** English Name */
+    english_name?: string | null;
+  };
+
+  type TMDBCompany = {
+    /** Id */
+    id?: number | null;
+    /** Name */
+    name?: string | null;
+    /** Logo Path */
+    logo_path?: string | null;
+    /** Origin Country */
+    origin_country?: string | null;
+  };
+
+  type TMDBCreatedBy = {
+    /** Id */
+    id?: number | null;
+    /** Name */
+    name?: string | null;
+    /** Profile Path */
+    profile_path?: string | null;
+  };
+
+  type TMDBCastMember = {
+    /** Id */
+    id?: number | null;
+    /** Name */
+    name?: string | null;
+    /** Character */
+    character?: string | null;
+    /** Profile Path */
+    profile_path?: string | null;
+  };
+
+  type TMDBMovieDetail = TMDBMovie & {
+    /** Tagline */
+    tagline?: string | null;
+    /** Status */
+    status?: string | null;
+    /** Runtime */
+    runtime?: number | null;
+    /** Vote Count */
+    vote_count?: number | null;
+    /** Homepage */
+    homepage?: string | null;
+    /** Imdb Id */
+    imdb_id?: string | null;
+    /** Budget */
+    budget?: number | null;
+    /** Revenue */
+    revenue?: number | null;
+    /** Genres */
+    genres?: TMDBGenre[];
+    /** Production Countries */
+    production_countries?: TMDBCountry[];
+    /** Spoken Languages */
+    spoken_languages?: TMDBSpokenLanguage[];
+    /** Production Companies */
+    production_companies?: TMDBCompany[];
+    /** Cast */
+    cast?: TMDBCastMember[];
+  };
+
+  type TMDBTVDetail = TMDBTV & {
+    /** Tagline */
+    tagline?: string | null;
+    /** Status */
+    status?: string | null;
+    /** Vote Count */
+    vote_count?: number | null;
+    /** Homepage */
+    homepage?: string | null;
+    /** Number Of Seasons */
+    number_of_seasons?: number | null;
+    /** Number Of Episodes */
+    number_of_episodes?: number | null;
+    /** Last Air Date */
+    last_air_date?: string | null;
+    /** Episode Run Time */
+    episode_run_time?: number[];
+    /** Origin Country */
+    origin_country?: string[];
+    /** Genres */
+    genres?: TMDBGenre[];
+    /** Production Countries */
+    production_countries?: TMDBCountry[];
+    /** Spoken Languages */
+    spoken_languages?: TMDBSpokenLanguage[];
+    /** Networks */
+    networks?: TMDBCompany[];
+    /** Created By */
+    created_by?: TMDBCreatedBy[];
+    /** Cast */
+    cast?: TMDBCastMember[];
+  };
+
+  type BaseResponseTMDBMovieDetail_ = {
+    /** Code */
+    code?: number;
+    /** Message */
+    message?: string;
+    data?: TMDBMovieDetail | null;
+  };
+
+  type BaseResponseTMDBTVDetail_ = {
+    /** Code */
+    code?: number;
+    /** Message */
+    message?: string;
+    data?: TMDBTVDetail | null;
   };
 
   type TMDBMovieListResponse = {

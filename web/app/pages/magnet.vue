@@ -59,11 +59,21 @@ const renameTemplateDialogOpen = ref(false)
 const editRenameMovie = ref('')
 const editRenameTv = ref('')
 const editRenameAnime = ref('')
-/** 自定义替换内容（留空则用页面 TMDB 名称/年份） */
+/** 自定义替换内容（name/year 留空则用页面识别；其余留空则按文件名自动识别） */
 const customRenameName = ref('')
 const customRenameYear = ref('')
+const customRenameSeason = ref('')
+const customRenameEpisode = ref('')
+const customRenameExtra = ref('')
+const customRenameSubSuffix = ref('')
+const customRenameExt = ref('')
 const editRenameName = ref('')
 const editRenameYear = ref('')
+const editRenameSeason = ref('')
+const editRenameEpisode = ref('')
+const editRenameExtra = ref('')
+const editRenameSubSuffix = ref('')
+const editRenameExt = ref('')
 const history = ref<string[]>([])
 const customKeywords = ref<string[]>([])
 const newKeyword = ref('')
@@ -422,6 +432,13 @@ const smartRename = () => {
     name,
     year || undefined,
     renameTemplates.value,
+    {
+      season: customRenameSeason.value,
+      episode: customRenameEpisode.value,
+      extra: customRenameExtra.value,
+      sub_suffix: customRenameSubSuffix.value,
+      ext: customRenameExt.value,
+    },
   )
   toast.success(`已为 ${selectedFiles.length} 个文件生成新名称`)
 }
@@ -434,6 +451,11 @@ const openRenameTemplateDialog = () => {
   // 资源名、年份：优先用当前页面已识别/输入的值，便于用户看到并修改
   editRenameName.value = (customRenameName.value || tmdbName.value || info.value?.name || '').trim()
   editRenameYear.value = (customRenameYear.value || editableYear.value || '').trim()
+  editRenameSeason.value = customRenameSeason.value
+  editRenameEpisode.value = customRenameEpisode.value
+  editRenameExtra.value = customRenameExtra.value
+  editRenameSubSuffix.value = customRenameSubSuffix.value
+  editRenameExt.value = customRenameExt.value
   renameTemplateDialogOpen.value = true
 }
 
@@ -446,6 +468,11 @@ const confirmRenameTemplateDialog = () => {
   }
   customRenameName.value = editRenameName.value.trim() || ''
   customRenameYear.value = editRenameYear.value.trim() || ''
+  customRenameSeason.value = editRenameSeason.value.trim() || ''
+  customRenameEpisode.value = editRenameEpisode.value.trim() || ''
+  customRenameExtra.value = editRenameExtra.value
+  customRenameSubSuffix.value = editRenameSubSuffix.value
+  customRenameExt.value = editRenameExt.value.trim() || ''
   renameTemplateDialogOpen.value = false
 }
 
@@ -839,7 +866,7 @@ const onCancel = () => {
 
   <!-- 智能重命名模板自定义弹窗 -->
   <Dialog v-model:open="renameTemplateDialogOpen">
-    <DialogContent class="max-w-xl max-h-[90vh] overflow-y-auto">
+    <DialogContent class="sm:max-w-3xl max-h-[90vh] overflow-y-auto w-[92vw]">
       <DialogHeader>
         <DialogTitle>自定义重命名模板</DialogTitle>
         <DialogDescription>
@@ -848,18 +875,18 @@ const onCancel = () => {
       </DialogHeader>
       <div class="space-y-4 py-2">
         <div class="rounded-md bg-muted/60 p-3 text-xs text-muted-foreground">
-          <div class="font-medium text-foreground mb-1.5">占位符</div>
-          <div class="flex flex-wrap gap-x-3 gap-y-1">
-            <span><code class="bg-muted px-1 rounded">{name}</code> 资源名</span>
-            <span><code class="bg-muted px-1 rounded">{year}</code> 年份</span>
-            <span><code class="bg-muted px-1 rounded">{season}</code> 季数</span>
-            <span><code class="bg-muted px-1 rounded">{ss}</code> 季数补零2位</span>
-            <span><code class="bg-muted px-1 rounded">{episode}</code> 集数</span>
-            <span><code class="bg-muted px-1 rounded">{ee}</code> 集数补零2位</span>
-            <span><code class="bg-muted px-1 rounded">{extra}</code> PV/Menu等</span>
-            <span><code class="bg-muted px-1 rounded">{sub_suffix}</code> 字幕后缀</span>
-            <span><code class="bg-muted px-1 rounded">{ext}</code> 扩展名</span>
-          </div>
+          <div class="font-medium text-foreground mb-1.5">占位符说明</div>
+          <ul class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 list-none">
+            <li><code class="bg-muted px-1 rounded">{name}</code> 资源名（TMDB / 自定义标题，如：末日三问）</li>
+            <li><code class="bg-muted px-1 rounded">{year}</code> 年份（电影常用，如：2026）</li>
+            <li><code class="bg-muted px-1 rounded">{season}</code> 季数（如：1）</li>
+            <li><code class="bg-muted px-1 rounded">{ss}</code> 季数补零两位（如：01）</li>
+            <li><code class="bg-muted px-1 rounded">{episode}</code> 集数（如：3）</li>
+            <li><code class="bg-muted px-1 rounded">{ee}</code> 集数补零两位（如：03）</li>
+            <li><code class="bg-muted px-1 rounded">{extra}</code> 额外标记，从原文件名识别 PV/Menu 等；没有则为空</li>
+            <li><code class="bg-muted px-1 rounded">{sub_suffix}</code> 字幕语言后缀（如： - CHT）；非字幕文件为空</li>
+            <li class="sm:col-span-2"><code class="bg-muted px-1 rounded">{ext}</code> 扩展名（含点号，如：.mkv、.srt）</li>
+          </ul>
         </div>
         <div class="space-y-2">
           <Label class="text-xs">电影 (movie)</Label>
@@ -888,23 +915,63 @@ const onCancel = () => {
         <div class="border-t border-border pt-4 space-y-3">
           <div class="font-medium text-sm text-foreground">替换内容（已按当前页面识别预填，可修改）</div>
           <p class="text-xs text-muted-foreground">
-            下方为当前识别到的资源名与年份，可直接修改；智能重命名时将用此处内容替换模板中的 {name}、{year}。
+            {name}、{year} 已按当前识别预填；其余字段留空则从文件名自动识别，填写后将覆盖全部勾选文件。{ss}/{ee} 由季数/集数自动补零。
           </p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div class="space-y-2">
-              <Label class="text-xs">资源名（对应 {name}）</Label>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div class="space-y-1.5 col-span-2">
+              <Label class="text-xs">{name} 资源名</Label>
               <Input
                 v-model="editRenameName"
                 class="text-xs"
-                placeholder="如：进击的巨人"
+                placeholder="如：怪奇物语"
               />
             </div>
-            <div class="space-y-2">
-              <Label class="text-xs">年份（对应 {year}，电影常用）</Label>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{year} 年份</Label>
               <Input
                 v-model="editRenameYear"
                 class="text-xs"
-                placeholder="如：2023"
+                placeholder="如：2016"
+              />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{season} 季数 → {ss}</Label>
+              <Input
+                v-model="editRenameSeason"
+                class="text-xs"
+                placeholder="留空自动识别"
+              />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{episode} 集数 → {ee}</Label>
+              <Input
+                v-model="editRenameEpisode"
+                class="text-xs"
+                placeholder="留空自动识别"
+              />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{extra} 额外标记</Label>
+              <Input
+                v-model="editRenameExtra"
+                class="text-xs font-mono"
+                placeholder=" - PV"
+              />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{sub_suffix} 字幕后缀</Label>
+              <Input
+                v-model="editRenameSubSuffix"
+                class="text-xs font-mono"
+                placeholder=" - CHT"
+              />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">{ext} 扩展名</Label>
+              <Input
+                v-model="editRenameExt"
+                class="text-xs font-mono"
+                placeholder=".mkv"
               />
             </div>
           </div>

@@ -6,8 +6,10 @@ from fastapi.concurrency import run_in_threadpool
 from app.schemas.base import BaseResponse
 from app.schemas.tmdb import (
     TMDBMovie,
+    TMDBMovieDetail,
     TMDBMovieListResponse,
     TMDBTV,
+    TMDBTVDetail,
     TMDBTVListResponse,
     TMDBSuggestionResponse,
     TMDBEnglishTitleResponse,
@@ -93,6 +95,14 @@ async def get_top_rated_tv(page: int = Query(1, description="页码")):
     return BaseResponse.success(data=TMDBTVListResponse(total=total, items=items))
 
 
+@router.get("/list/top_rated/anime", response_model=BaseResponse[TMDBTVListResponse], summary="高分番剧")
+async def get_top_rated_anime(page: int = Query(1, description="页码")):
+    """TMDB 高分番剧（动画剧集），供番剧推荐的「历史高分」使用。"""
+    results, total = await run_in_threadpool(tmdb_service.get_top_rated_anime, page)
+    items = [_convert_result(r) for r in results]
+    return BaseResponse.success(data=TMDBTVListResponse(total=total, items=items))
+
+
 @router.get("/suggestions", response_model=BaseResponse[TMDBSuggestionResponse], summary="搜索提示补全")
 async def get_suggestions(
     query: str = Query(..., description="搜索关键词"),
@@ -104,18 +114,18 @@ async def get_suggestions(
     return BaseResponse.success(data={"suggestions": suggestions})
 
 
-@router.get("/movie/{movie_id}", response_model=BaseResponse[TMDBMovie], summary="获取电影详情")
+@router.get("/movie/{movie_id}", response_model=BaseResponse[TMDBMovieDetail], summary="获取电影详情")
 async def get_movie_detail(movie_id: int):
     """获取指定电影的详细信息"""
     result = await run_in_threadpool(tmdb_service.get_movie_details, movie_id)
-    return BaseResponse.success(data=_convert_result(result))
+    return BaseResponse.success(data=_to_plain(result))
 
 
-@router.get("/tv/{tv_id}", response_model=BaseResponse[TMDBTV], summary="获取电视剧详情")
+@router.get("/tv/{tv_id}", response_model=BaseResponse[TMDBTVDetail], summary="获取电视剧详情")
 async def get_tv_detail(tv_id: int):
     """获取指定电视剧的详细信息"""
     result = await run_in_threadpool(tmdb_service.get_tv_details, tv_id)
-    return BaseResponse.success(data=_convert_result(result))
+    return BaseResponse.success(data=_to_plain(result))
 
 
 @router.get(
@@ -147,3 +157,15 @@ def _convert_result(result: Any) -> dict:
     if hasattr(result, "__dict__"):
         return {k: v for k, v in result.__dict__.items() if not k.startswith("_")}
     return result
+
+
+def _to_plain(result: Any) -> Any:
+    """将 tmdbv3api 的 AsObj 详情对象转换为完整的原始 dict（含嵌套结构）。
+
+    AsObj 会把接口返回的原始 JSON 保存在 ``_json``，直接取用可保留
+    genres / networks / spoken_languages 等嵌套字段，供详情响应模型解析。
+    """
+    raw = getattr(result, "_json", None)
+    if isinstance(raw, dict):
+        return raw
+    return _convert_result(result)

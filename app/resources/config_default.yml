@@ -54,6 +54,11 @@ anime_garden:
   # teams_url 不配置时自动取 url 的 base + /teams，用于获取字幕组列表
   page_size: 20                               # 每页数量
 
+# Bangumi (bgm.tv) 番组计划配置
+# 用于番剧推荐的「本周新番」周历，公开接口无需 token
+bangumi:
+  api_url: "https://api.bgm.tv"               # Bangumi API 地址
+
 # 字幕服务
 subtitle:
   # ASSRT字幕站

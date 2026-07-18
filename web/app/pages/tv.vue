@@ -3,14 +3,30 @@ import {
   searchTvApiV1TmdbSearchTvGet,
   getTvEnglishTitleApiV1TmdbTvTvIdEnglishTitleGet,
 } from '@/api/tmdb'
+import { Info, Star } from 'lucide-vue-next'
 import AppLoadingOverlay from '@/components/AppLoadingOverlay.vue'
 import AppEmpty from '@/components/AppEmpty.vue'
 import AppPagination from '@/components/AppPagination.vue'
+import MediaDetailDialog from '@/components/MediaDetailDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
 
 const { imgBase, loadImageDomain } = useTmdbImage()
+
+// 详情模态框状态
+const detailOpen = ref(false)
+const detailItem = ref<API.TMDBTV | null>(null)
+
+// 打开详情模态框（阻止冒泡，避免触发卡片跳转）
+const openDetail = (it: API.TMDBTV) => {
+  detailItem.value = it
+  detailOpen.value = true
+}
+
+// 格式化评分，无有效评分返回空
+const formatRating = (v: number | null | undefined) =>
+  typeof v === 'number' && v > 0 ? v.toFixed(1) : ''
 
 // 响应式状态：搜索来源、分页与列表
 const searchSource = ref<'piratebay' | 'anime' | 'assrt'>('piratebay')
@@ -137,7 +153,7 @@ const goSearch = async (it: API.TMDBTV) => {
         class="group relative rounded-xl border border-border bg-card shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md hover:-translate-y-1 hover:border-primary/50 cursor-pointer flex flex-col h-full"
         @click="goSearch(it)"
       >
-        <div class="aspect-[2/3] overflow-hidden bg-muted">
+        <div class="aspect-[2/3] overflow-hidden bg-muted relative">
           <img 
             v-if="it.poster_path" 
             :src="imgBase + it.poster_path" 
@@ -148,6 +164,23 @@ const goSearch = async (it: API.TMDBTV) => {
           <div v-else class="w-full h-full flex items-center justify-center bg-muted text-muted-foreground">
             无海报
           </div>
+          <!-- 评分角标 -->
+          <div
+            v-if="formatRating(it.vote_average)"
+            class="absolute top-2 left-2 inline-flex items-center gap-1 rounded-md bg-black/65 px-1.5 py-0.5 text-xs font-semibold text-amber-300 backdrop-blur-sm"
+          >
+            <Star class="size-3 fill-amber-400 stroke-amber-400" />
+            {{ formatRating(it.vote_average) }}
+          </div>
+          <!-- 详情按钮 -->
+          <button
+            type="button"
+            class="absolute top-2 right-2 inline-flex items-center justify-center rounded-full bg-black/55 p-1.5 text-white/90 backdrop-blur-sm transition-colors hover:bg-black/80 hover:text-white cursor-pointer"
+            title="查看详情"
+            @click.stop="openDetail(it)"
+          >
+            <Info class="size-4" />
+          </button>
         </div>
         <div class="p-3 sm:p-4 space-y-1 bg-card flex flex-col flex-1 min-h-0">
           <div class="text-base font-semibold break-words line-clamp-3 leading-snug group-hover:text-primary transition-colors">{{ it.name || it.original_name || '未命名' }}</div>
@@ -162,5 +195,6 @@ const goSearch = async (it: API.TMDBTV) => {
       :items-per-page="itemsPerPage"
       :total="totalForPagination"
     />
+    <MediaDetailDialog v-model:open="detailOpen" :media="detailItem" type="tv" />
   </div>
 </template>

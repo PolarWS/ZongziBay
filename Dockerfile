@@ -55,7 +55,7 @@ COPY --from=frontend-builder /web/.output/public ./web/.output/public
 RUN mkdir -p config
 
 # Copy entrypoint script
-COPY entrypoint.sh .
+COPY script/entrypoint.sh .
 RUN sed -i 's/\r$//' entrypoint.sh
 RUN chmod +x entrypoint.sh
 

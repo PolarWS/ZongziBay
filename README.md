@@ -30,6 +30,7 @@
 | **文件整理** | 下载完成后按类型归档，支持复制或 qB 移动、智能重命名 |
 | **字幕** | Assrt 字幕搜索与下载，字幕任务队列与自动移动重命名 |
 | **媒体信息** | TMDB 海报、简介等元数据展示 |
+| **番剧推荐** | Bangumi (bgm.tv) 每日放送「本周新番」周历 |
 | **Web 界面** | Nuxt 3 现代 UI，深色模式，设置页可在线编辑配置 |
 
 ## 技术栈
@@ -84,6 +85,7 @@ python -m pytest tests/ -v
 | 动漫资源搜索 | 动漫花园 (Anime Garden) | [GitHub](https://github.com/animegarden) · [镜像站](https://animes.garden/) |
 | 电影/剧集种子搜索 | 海盗湾 (The Pirate Bay) | [thepiratebay.org](https://thepiratebay.org/) |
 | 字幕搜索与下载 | 射手网(伪) (Assrt) | [assrt.net](https://assrt.net/) |
+| 番剧周历（每日放送） | Bangumi (番组计划) | [bgm.tv](https://bgm.tv/) · [API](https://github.com/bangumi/api) |
 | 社区支持 | LinuxDo | [linux.do](https://linux.do/) |
 
 ---

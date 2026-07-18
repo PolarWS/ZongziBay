@@ -122,7 +122,9 @@ const applyingDefaults = reactive({
   assrt: false,
 })
 const showDefaultKeyDialog = ref(false)
+const showAutoAppliedTmdbDialog = ref(false)
 const defaultKeyTarget = ref<'tmdb' | 'assrt'>('tmdb')
+const pendingAdvanceAfterTmdbDialog = ref(false)
 
 const confirmApplyDefaultKeys = async () => {
   const target = defaultKeyTarget.value
@@ -155,6 +157,36 @@ const applyDefaultTmdbKey = () => {
 const applyDefaultAssrtKey = () => {
   defaultKeyTarget.value = 'assrt'
   showDefaultKeyDialog.value = true
+}
+
+function hasTmdbKeyConfigured() {
+  return Boolean(tmdbApiKey.value.trim() || existingFields.tmdbApiKey)
+}
+
+async function autoApplyDefaultTmdbKey() {
+  applyingDefaults.tmdb = true
+  try {
+    await applyDefaultTmdbKeyApiV1SystemConfigApplyDefaultTmdbKeyPost()
+    existingFields.tmdbApiKey = true
+    return true
+  } catch (e: any) {
+    toast.error(e?.message || '自动应用 TMDB 默认密钥失败')
+    return false
+  } finally {
+    applyingDefaults.tmdb = false
+  }
+}
+
+function dismissAutoAppliedTmdbDialog() {
+  showAutoAppliedTmdbDialog.value = false
+  if (pendingAdvanceAfterTmdbDialog.value) {
+    pendingAdvanceAfterTmdbDialog.value = false
+    if (currentStep.value < STEPS.length - 1) currentStep.value++
+  }
+}
+
+function onAutoAppliedTmdbDialogOpenChange(open: boolean) {
+  if (!open) dismissAutoAppliedTmdbDialog()
 }
 
 function resetApiDefaults() {
@@ -268,7 +300,7 @@ async function loadExistingConfig() {
   }
 }
 
-function nextStep() {
+async function nextStep() {
   // 步骤 1：账号验证
   if (currentStep.value === 1) {
     if (!username.value.trim()) {
@@ -298,6 +330,14 @@ function nextStep() {
       toast.error('请先测试 qBittorrent 连通性，通过后再继续')
       return
     }
+  }
+  // 步骤 3：未配置 TMDB 时强制写入默认密钥并提示
+  if (currentStep.value === 3 && !hasTmdbKeyConfigured()) {
+    const ok = await autoApplyDefaultTmdbKey()
+    if (!ok) return
+    pendingAdvanceAfterTmdbDialog.value = true
+    showAutoAppliedTmdbDialog.value = true
+    return
   }
   // 步骤 5：连通性测试验证
   if (currentStep.value === 5) {
@@ -659,9 +699,12 @@ onMounted(async () => {
               <Input id="qb-host" v-model="qbHost" placeholder="http://localhost:8080" class="input-field" />
             </div>
           </div>
-          <p class="text-xs text-muted-foreground/60 -mt-3 mb-1">以下两种认证方式任选其一即可</p>
+          <div class="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5 space-y-1">
+            <p class="text-xs font-medium text-foreground/85">认证方式二选一（填一种即可，无需都填）</p>
+            <p class="text-xs text-muted-foreground/70">方式一：用户名 + 密码；方式二：API Key（需 qBittorrent 5.2.0+）</p>
+          </div>
           <div class="space-y-1.5">
-            <Label class="text-sm font-medium text-foreground/75">用户名密码认证</Label>
+            <Label class="text-sm font-medium text-foreground/75">方式一：用户名密码</Label>
             <div class="grid grid-cols-2 gap-2">
               <Input v-model="qbUsername" placeholder="用户名" class="input-field !pl-3" />
               <div class="input-wrapper">
@@ -675,11 +718,11 @@ onMounted(async () => {
           </div>
           <div class="flex items-center gap-3">
             <div class="flex-1 h-px bg-border" />
-            <span class="text-xs text-muted-foreground shrink-0">或者</span>
+            <span class="text-xs text-muted-foreground shrink-0">或</span>
             <div class="flex-1 h-px bg-border" />
           </div>
           <div class="space-y-1.5">
-            <Label for="qb-api" class="text-sm font-medium text-foreground/75">API Key <span class="text-xs text-muted-foreground/60">(qB 5.2.0+)</span></Label>
+            <Label for="qb-api" class="text-sm font-medium text-foreground/75">方式二：API Key <span class="text-xs text-muted-foreground/60">(qB 5.2.0+)</span></Label>
             <div class="input-wrapper">
               <KeyRound class="input-icon" />
               <Input id="qb-api" v-model="qbApiKey" :type="showQbApiKey ? 'text' : 'password'" :placeholder="existingFields.qbApiKey ? '已配置，留空则保持不变' : 'qBittorrent API Key'" class="input-field" />
@@ -713,9 +756,9 @@ onMounted(async () => {
 
         <!-- API Keys -->
         <div v-if="currentStep === 3" class="space-y-4">
-          <div class="flex items-center justify-between">
-            <p class="text-xs text-muted-foreground">配置各服务的 API 密钥和连接地址，通常保持默认即可</p>
-            <Button size="xs" variant="ghost" class="text-xs h-7 px-2 text-muted-foreground hover:text-foreground" @click="resetApiDefaults">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs text-muted-foreground">配置各服务的 API 密钥；TMDB 为必填，否则无法使用搜索、元数据等基础服务</p>
+            <Button size="xs" variant="ghost" class="text-xs h-7 px-2 text-muted-foreground hover:text-foreground shrink-0" @click="resetApiDefaults">
               <RefreshCw class="w-3 h-3 mr-1" />恢复默认
             </Button>
           </div>
@@ -725,12 +768,13 @@ onMounted(async () => {
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <Film class="h-4 w-4 text-muted-foreground" />
-                <span class="text-sm font-medium text-foreground/75">TMDB</span>
+                <span class="text-sm font-medium text-foreground/75">TMDB <span class="text-red-500">*</span></span>
               </div>
               <a href="https://github.com/PolarWS/ZongziBay/blob/main/docs/api_keys_guide.md" target="_blank" class="flex items-center gap-1 text-xs text-primary hover:underline shrink-0">
                 获取教程 <ExternalLink class="w-3 h-3" />
               </a>
             </div>
+            <p class="text-xs text-muted-foreground/80 -mt-1">用于影视搜索与元数据识别；未配置将无法使用基础服务。未填写时点下一步会自动写入项目默认密钥。</p>
             <div class="space-y-1.5">
               <Label class="text-xs">API Key</Label>
               <div class="flex gap-2">
@@ -955,7 +999,11 @@ onMounted(async () => {
           <Loader2 v-if="loading" class="w-4 h-4 mr-1.5 animate-spin" />
           {{ loading ? '初始化中...' : '完成初始化' }}
         </Button>
-        <Button v-else-if="currentStep < 5" size="sm" @click="nextStep">下一步 <ChevronRight class="w-4 h-4 ml-1" /></Button>
+        <Button v-else-if="currentStep < 5" size="sm" :disabled="applyingDefaults.tmdb" @click="nextStep">
+          <Loader2 v-if="applyingDefaults.tmdb && currentStep === 3" class="w-4 h-4 mr-1.5 animate-spin" />
+          {{ applyingDefaults.tmdb && currentStep === 3 ? '配置中…' : '下一步' }}
+          <ChevronRight v-if="!(applyingDefaults.tmdb && currentStep === 3)" class="w-4 h-4 ml-1" />
+        </Button>
       </div>
 
       <p class="text-center text-xs text-muted-foreground/40 mt-6 tracking-wider">&copy; ZongziBay {{ new Date().getFullYear() }}</p>
@@ -969,6 +1017,9 @@ onMounted(async () => {
         <DialogHeader>
           <DialogTitle>使用项目默认密钥</DialogTitle>
           <DialogDescription class="space-y-3 text-left">
+            <p v-if="defaultKeyTarget === 'tmdb'">
+              TMDB API Key 用于影视搜索与元数据识别，<strong class="text-foreground">未配置将无法使用基础服务</strong>。
+            </p>
             <p>
               项目提供的
               <strong class="text-foreground">{{ defaultKeyTarget === 'tmdb' ? 'TMDB' : 'ASSRT' }}</strong>
@@ -995,6 +1046,34 @@ onMounted(async () => {
           <Button :disabled="applyingDefaults.tmdb || applyingDefaults.assrt" @click="confirmApplyDefaultKeys">
             {{ (defaultKeyTarget === 'tmdb' ? applyingDefaults.tmdb : applyingDefaults.assrt) ? '应用中…' : '确认使用' }}
           </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 未填写 TMDB 时自动应用默认密钥的提示 -->
+    <Dialog :open="showAutoAppliedTmdbDialog" @update:open="onAutoAppliedTmdbDialogOpenChange">
+      <DialogContent class="max-w-md w-[calc(100vw-1rem)] sm:w-full">
+        <DialogHeader>
+          <DialogTitle>已自动配置 TMDB 默认密钥</DialogTitle>
+          <DialogDescription class="space-y-3 text-left">
+            <p>
+              TMDB API Key 用于影视搜索与元数据识别，<strong class="text-foreground">没有它将无法使用基础服务</strong>。
+              检测到你尚未填写，已为你<strong class="text-foreground">自动写入项目默认密钥</strong>，以便继续初始化。
+            </p>
+            <p>
+              该密钥为公共密钥，<strong class="text-foreground">请求速率有严格限制</strong>，多人共用时可能触发限流导致元数据获取失败。
+              建议稍后前往官网<strong class="text-foreground">免费申请自己的密钥</strong>：
+            </p>
+            <ul class="list-disc list-inside space-y-1 text-xs">
+              <li>TMDB：<a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer" class="text-primary underline">themoviedb.org/settings/api</a></li>
+            </ul>
+            <p class="text-xs">
+              详细图文教程：<a href="https://github.com/PolarWS/ZongziBay/blob/main/docs/api_keys_guide.md" target="_blank" rel="noopener noreferrer" class="text-primary underline">API Key 获取指南</a>
+            </p>
+          </DialogDescription>
+        </DialogHeader>
+        <div class="flex justify-end mt-4">
+          <Button @click="dismissAutoAppliedTmdbDialog">知道了，继续</Button>
         </div>
       </DialogContent>
     </Dialog>

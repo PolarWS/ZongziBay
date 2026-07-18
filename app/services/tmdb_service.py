@@ -3,7 +3,7 @@ import os
 from typing import Any, List, Optional
 
 import requests
-from tmdbv3api import TMDb, Movie, TV, Search, Trending
+from tmdbv3api import TMDb, Movie, TV, Search, Trending, Discover
 
 from app.core.config import config
 
@@ -36,6 +36,7 @@ class TMDBService:
         self.tv = TV()
         self.search = Search()
         self.trending = Trending()
+        self.discover = Discover()
 
     def reload_config(self) -> None:
         """从当前运行时配置刷新 TMDB 客户端参数（设置页保存后可立即生效）。"""
@@ -115,13 +116,53 @@ class TMDBService:
         """混合搜索（电影、电视、人物等）"""
         return self.search.multi(query, page=page)
 
+    @staticmethod
+    def _detail_to_dict(detail: Any) -> dict:
+        """将 tmdbv3api 详情对象转换为完整原始 dict（含嵌套结构）"""
+        raw = getattr(detail, "_json", None)
+        if isinstance(raw, dict):
+            return dict(raw)
+        if isinstance(detail, dict):
+            return dict(detail)
+        if hasattr(detail, "__dict__"):
+            return {k: v for k, v in detail.__dict__.items() if not k.startswith("_")}
+        return {}
+
+    def _get_cast(self, api_obj: Any, media_id: int, limit: int = 15) -> List[dict]:
+        """获取主要演员阵容（按 TMDB 顺序取前 N 位）"""
+        try:
+            credits = api_obj.credits(media_id)
+            cast_raw = getattr(credits, "cast", None)
+            cast_list = list(cast_raw) if cast_raw else []
+            result: List[dict] = []
+            for c in cast_list[:limit]:
+                name = _attr_or_key(c, "name")
+                if not name:
+                    continue
+                result.append({
+                    "id": getattr(c, "id", None) if not isinstance(c, dict) else c.get("id"),
+                    "name": name,
+                    "character": _attr_or_key(c, "character"),
+                    "profile_path": _attr_or_key(c, "profile_path"),
+                })
+            return result
+        except Exception as e:
+            logger.debug("获取演员阵容失败 media_id=%s: %s", media_id, e)
+            return []
+
     def get_movie_details(self, movie_id: int) -> Any:
-        """获取电影详情"""
-        return self.movie.details(movie_id)
+        """获取电影详情（含主要演员阵容）"""
+        detail = self.movie.details(movie_id)
+        data = self._detail_to_dict(detail)
+        data["cast"] = self._get_cast(self.movie, movie_id)
+        return data
 
     def get_tv_details(self, tv_id: int) -> Any:
-        """获取电视剧详情"""
-        return self.tv.details(tv_id)
+        """获取电视剧详情（含主要演员阵容）"""
+        detail = self.tv.details(tv_id)
+        data = self._detail_to_dict(detail)
+        data["cast"] = self._get_cast(self.tv, tv_id)
+        return data
 
     def get_movie_english_title(self, movie_id: int) -> Optional[str]:
         """获取电影的英文标题（供海盗湾等英文搜索使用）。优先 en-US 详情主标题，再 fallback 到 alternative_titles。"""
@@ -259,6 +300,32 @@ class TMDBService:
             return results, self._total_from_raw(raw, len(results))
         except requests.RequestException as e:
             logger.warning("TMDB 高分剧集请求失败: %s", e)
+            return [], 0
+
+    def get_top_rated_anime(self, page: int = 1) -> tuple:
+        """历史高分番剧（动画剧集）。
+
+        用 TMDB discover 按题材=动画(16) 过滤，评分降序，且要求足够票数以过滤冷门条目。
+        返回 (list, total)，与其它列表接口保持一致。
+        """
+        params = {
+            "with_genres": "16",
+            "sort_by": "vote_average.desc",
+            "vote_count.gte": 300,
+            "page": page,
+        }
+        try:
+            raw = self.discover.discover_tv_shows(params)
+            results = self._extract_results(raw)
+            total = self._total_from_raw(raw, len(results))
+            if not total:
+                total = getattr(self.discover, "total_results", 0) or len(results)
+            return results, int(total or 0)
+        except requests.RequestException as e:
+            logger.warning("TMDB 高分番剧请求失败: %s", e)
+            return [], 0
+        except Exception as e:
+            logger.warning("TMDB 高分番剧解析失败: %s", e)
             return [], 0
 
     def get_search_suggestions(self, query: str, limit: int = 10, media_type: str = "") -> List[str]:
