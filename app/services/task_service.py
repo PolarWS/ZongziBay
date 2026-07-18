@@ -47,7 +47,8 @@ class TaskService:
         return result
 
     def add_task(self, request: AddTaskRequest) -> int:
-        # 0. 提取 Hash 并检查 qBittorrent 中是否已存在该任务
+        """添加下载任务。立即写入 DB 并返回,后台由 task_monitor 异步推送到 qBittorrent."""
+        # 0. 提取 Hash 并检查是否已存在
         torrent_hash = None
         if request.sourceUrl.startswith("magnet:?"):
             match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', request.sourceUrl)
@@ -55,9 +56,12 @@ class TaskService:
                 torrent_hash = normalize_info_hash(match.group(1))
 
         if torrent_hash:
-            # 1. 检查 DB 中是否已有此 Hash 的活跃任务，若有则复用，避免“打架”
+            # 1. 检查 DB 中是否已有此 Hash 的活跃任务，若有则复用
             existing_db_tasks = db.get_tasks_by_hash(torrent_hash)
-            active_task = next((t for t in existing_db_tasks if t['taskStatus'] not in ('completed', 'error', 'paused', 'cancelled')), None)
+            active_task = next((
+                t for t in existing_db_tasks
+                if t['taskStatus'] not in ('completed', 'error', 'paused', 'cancelled', 'fetching_metadata_failed')
+            ), None)
             if active_task:
                 logger.info(f"[TaskService] 检测到 DB 中已存在此 Hash 的活跃任务: {active_task['id']}，复用之")
                 return active_task['id']
@@ -65,10 +69,9 @@ class TaskService:
             # 2. 检查 qBittorrent 中是否已存在该任务
             existing_info = self.qb_client.get_torrent_info(torrent_hash)
             if existing_info:
-                # 任务已存在 qB 但 DB 中没有活跃任务，插入一条新记录接管之
                 logger.info(f"[TaskService] 检测到任务已存在于 qBittorrent: {torrent_hash}，状态: {existing_info.get('state')}")
 
-        # 1. 确定路径：优先使用请求中的路径，否则按 type 选择配置
+        # 3. 确定路径
         if request.type == 'tv':
             default_source = config.get("paths.tv_download_path", "/dl/tv")
             default_target = config.get("paths.tv_target_path", "/nas/tv")
@@ -82,7 +85,6 @@ class TaskService:
             default_source = config.get("paths.default_download_path", "/downloads")
             default_target = config.get("paths.default_target_path", "/downloads")
 
-        # 绝对路径直接用，相对路径拼接默认路径
         if request.sourcePath:
             if os.path.isabs(request.sourcePath):
                 source_path = request.sourcePath
@@ -99,16 +101,19 @@ class TaskService:
         else:
             target_path = default_target
 
-        # 2. 数据库预插入（commit=False），失败时回滚
+        # 4. 立即写入 DB（状态：获取下载信息），不等待 qB 推送 —— 由 task_monitor 异步处理
         conn = db.get_conn()
         try:
+            # 若 qB 中已存在，直接以 downloading 录入
+            initial_status = "downloading" if (torrent_hash and self.qb_client.get_torrent_info(torrent_hash)) else "fetching_metadata"
+
             task_id = db.insert_download_task(
                 taskName=request.taskName,
                 taskInfo=request.taskInfo,
                 sourceUrl=request.sourceUrl,
                 sourcePath=source_path,
                 targetPath=target_path,
-                taskStatus="downloading",
+                taskStatus=initial_status,
                 commit=False
             )
             if request.file_tasks:
@@ -121,20 +126,21 @@ class TaskService:
                         file_status="pending",
                         commit=False
                     )
-            logger.info(f"[TaskService] DB预插入成功 task_id={task_id}, 等待调用 qBittorrent...")
 
-            # 3. 调用 qBittorrent API
-            self.push_to_qb(task_id, request.sourceUrl, source_path, torrent_hash, request.file_tasks)
-
-            # 4. 提交事务，添加通知
             conn.commit()
-            logger.info(f"[TaskService] 任务添加成功: task_id={task_id}, 已同步至 DB 和 qBittorrent")
-            db.insert_notification(title="添加任务成功", content=f"任务 {request.taskName} 已开始下载", type=NotificationType.SUCCESS.value)
+
+            if initial_status == "downloading":
+                # qB 中已存在，直接推送文件过滤
+                logger.info(f"[TaskService] 任务已存于 qB，直接录入: task_id={task_id}")
+                db.insert_notification(title="添加任务成功", content=f"任务 {request.taskName} 已开始下载", type=NotificationType.SUCCESS.value)
+            else:
+                logger.info(f"[TaskService] 任务已创建 (fetching_metadata): task_id={task_id}，等待 task_monitor 推送到 qB")
+                db.insert_notification(title="任务已创建", content=f"任务 {request.taskName} 正在获取下载信息…", type=NotificationType.INFO.value)
             return task_id
 
         except Exception as e:
             logger.error(f"[TaskService] 添加任务异常, 执行回滚: {e}")
-            conn.rollback()  # 防止脏数据
+            conn.rollback()
             if isinstance(e, BusinessException):
                 raise e
             raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"添加任务失败: {str(e)}")
@@ -187,7 +193,7 @@ class TaskService:
                 # 有文件选择时先暂停添加，等元数据后设置优先级再恢复
                 should_filter_files = bool(file_tasks)
                 is_paused = should_filter_files
-                # 为避免只选部分文件时 qB 生成多余“种子名子目录”，统一使用 NoSubfolder
+                # 为避免只选部分文件时 qB 生成多余"种子名子目录"，统一使用 NoSubfolder
                 success = self.qb_client.add_torrent(
                     urls=download_url,
                     save_path=source_path,
@@ -221,8 +227,8 @@ class TaskService:
         if not task:
             raise BusinessException(code=ErrorCode.NOT_FOUND_ERROR, message="任务不存在")
         status = task.get('taskStatus') or ''
-        if status not in ('downloading', 'pending', 'seeding'):
-            raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="只有下载中、等待中或做种中的任务可以取消")
+        if status not in ('downloading', 'pending', 'seeding', 'fetching_metadata', 'fetching_metadata_failed'):
+            raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="只有活跃状态的任务可以取消")
 
         source_url = task['sourceUrl']
         torrent_hash = None

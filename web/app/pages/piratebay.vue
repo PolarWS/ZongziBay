@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
 import {
   ArrowUpCircle,
   ArrowDownCircle,
@@ -20,7 +21,9 @@ import {
   Clock,
   Tag,
   Film,
-  Magnet
+  Magnet,
+  ArrowUpDown,
+  X,
 } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -34,6 +37,59 @@ const selected = ref<API.PirateBayTorrent | null>(null)
 const errMsg = ref<string | null>(null)
 const season = ref('')
 const episode = ref('')
+
+// ---- 排序 ----
+type SortField = 'date' | 'size' | 'name' | 'seeders'
+type SortOrder = 'asc' | 'desc'
+const SORT_OPTIONS: { field: SortField; label: string }[] = [
+  { field: 'date', label: '时间' },
+  { field: 'size', label: '大小' },
+  { field: 'seeders', label: '做种' },
+  { field: 'name', label: '名称' },
+]
+const sortField = ref<SortField | null>(null)
+const sortOrder = ref<SortOrder>('desc')
+
+function toggleSort(field: SortField) {
+  if (sortField.value === field) {
+    if (sortOrder.value === 'desc') {
+      sortOrder.value = 'asc'
+    } else {
+      sortField.value = null
+      sortOrder.value = 'desc'
+    }
+  } else {
+    sortField.value = field
+    sortOrder.value = 'desc'
+  }
+}
+
+const sortedItems = computed(() => {
+  const list = [...items.value]
+  const field = sortField.value
+  if (!field) return list
+
+  const dir = sortOrder.value === 'asc' ? 1 : -1
+  return list.sort((a, b) => {
+    if (field === 'date') {
+      const ta = Number(a.added)
+      const tb = Number(b.added)
+      return dir * ((isFinite(ta) ? ta : 0) - (isFinite(tb) ? tb : 0))
+    }
+    if (field === 'size') {
+      const sa = Number(a.size)
+      const sb = Number(b.size)
+      return dir * ((isFinite(sa) ? sa : 0) - (isFinite(sb) ? sb : 0))
+    }
+    if (field === 'seeders') {
+      const sa = Number(a.seeders)
+      const sb = Number(b.seeders)
+      return dir * ((isFinite(sa) ? sa : 0) - (isFinite(sb) ? sb : 0))
+    }
+    // name
+    return dir * (a.name || '').localeCompare(b.name || '', 'zh-CN')
+  })
+})
 
 // 从路由派生的计算属性
 const q = computed(() => (route.query.q as string) || '')
@@ -238,10 +294,39 @@ const openMagnetPage = (it: API.PirateBayTorrent) => {
       </div>
     </div>
     <AppLoadingOverlay v-if="loading" />
-    <div v-else-if="items.length > 0" class="rounded-md border border-border bg-card shadow-sm">
+    <div v-else-if="items.length > 0">
+      <!-- 排序控件（仅当页排序，API 不支持服务端排序） -->
+      <div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-4">
+        <ArrowUpDown class="w-3.5 h-3.5 shrink-0" />
+        <span class="mr-0.5">排序</span>
+        <Badge
+          v-for="opt in SORT_OPTIONS"
+          :key="opt.field"
+          :variant="sortField === opt.field ? 'default' : 'outline'"
+          class="cursor-pointer hover:opacity-80 select-none h-6 px-2 text-xs leading-none flex items-center gap-0.5 transition-colors"
+          @click="toggleSort(opt.field)"
+        >
+          {{ opt.label }}
+          <span v-if="sortField === opt.field" class="text-[10px] ml-0.5">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+        </Badge>
+        <button
+          v-if="sortField"
+          class="inline-flex items-center justify-center rounded-full w-4 h-4 text-[10px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
+          title="清除排序"
+          @click="sortField = null; sortOrder = 'desc'"
+        >
+          <X class="w-3 h-3" />
+        </button>
+        <span
+          v-if="sortField"
+          class="text-[10px] text-muted-foreground/40 select-none"
+          title="API 不支持服务端排序，仅对当前页结果排序"
+        >当页</span>
+      </div>
+      <div class="rounded-md border border-border bg-card shadow-sm">
       <ul class="divide-y divide-border">
         <li
-          v-for="it in items"
+          v-for="it in sortedItems"
           :key="it.id"
           class="p-4 md:p-5 hover:bg-muted/50 cursor-pointer"
           @click="onOpenDetails(it)"
@@ -271,6 +356,7 @@ const openMagnetPage = (it: API.PirateBayTorrent) => {
           </div>
         </li>
       </ul>
+      </div>
     </div>
     <AppEmpty v-else :title="errMsg ? '搜索失败' : '暂无结果'">
       <Button v-if="errMsg" size="sm" @click="fetchData">刷新</Button>

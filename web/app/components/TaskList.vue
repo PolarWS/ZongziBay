@@ -250,13 +250,13 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
               <td class="p-2 sm:p-4 align-middle [&:has([role=checkbox])]:pr-0">
                  <div class="flex items-center gap-2">
                     <span class="relative flex h-2 w-2">
-                      <span v-if="['downloading', 'pending_download', 'moving', 'seeding'].includes(item.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': item.taskStatus === 'seeding' }"></span>
+                      <span v-if="['downloading', 'pending_download', 'moving', 'seeding', 'fetching_metadata'].includes(item.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': item.taskStatus === 'seeding' }"></span>
                       <span class="relative inline-flex rounded-full h-2 w-2" 
                         :class="{
-                          'bg-blue-500': ['downloading', 'pending_download', 'moving'].includes(item.taskStatus || ''),
+                          'bg-blue-500': ['downloading', 'pending_download', 'moving', 'fetching_metadata'].includes(item.taskStatus || ''),
                           'bg-purple-500': item.taskStatus === 'seeding',
                           'bg-green-500': item.taskStatus === 'completed',
-                          'bg-red-500': ['cancelled', 'error'].includes(item.taskStatus || ''),
+                          'bg-red-500': ['cancelled', 'error', 'fetching_metadata_failed'].includes(item.taskStatus || ''),
                           'bg-yellow-500': item.taskStatus === 'pending'
                         }"
                       ></span>
@@ -267,7 +267,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
               <td class="p-2 sm:p-4 align-middle [&:has([role=checkbox])]:pr-0 text-right">
                 <div class="flex items-center justify-end h-8">
                   <Button 
-                     v-if="['downloading', 'pending_download', 'pending', 'seeding'].includes(item.taskStatus || '')"
+                     v-if="['downloading', 'pending_download', 'pending', 'seeding', 'fetching_metadata', 'fetching_metadata_failed'].includes(item.taskStatus || '')"
                      variant="ghost" 
                      size="sm" 
                      class="h-8 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2"
@@ -324,13 +324,13 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                      </span>
                      <span class="font-mono text-sm pl-5 flex items-center gap-2">
                         <span class="relative flex h-2.5 w-2.5">
-                          <span v-if="['downloading', 'pending_download', 'moving', 'seeding'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': selected?.taskStatus === 'seeding' }"></span>
+                          <span v-if="['downloading', 'pending_download', 'moving', 'seeding', 'fetching_metadata'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': selected?.taskStatus === 'seeding' }"></span>
                           <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
                             :class="{
-                              'bg-blue-500': ['downloading', 'pending_download', 'moving'].includes(selected?.taskStatus || ''),
+                              'bg-blue-500': ['downloading', 'pending_download', 'moving', 'fetching_metadata'].includes(selected?.taskStatus || ''),
                               'bg-purple-500': selected?.taskStatus === 'seeding',
                               'bg-green-500': selected?.taskStatus === 'completed',
-                              'bg-red-500': ['cancelled', 'error'].includes(selected?.taskStatus || ''),
+                              'bg-red-500': ['cancelled', 'error', 'fetching_metadata_failed'].includes(selected?.taskStatus || ''),
                               'bg-yellow-500': selected?.taskStatus === 'pending'
                             }"
                           ></span>
@@ -387,13 +387,13 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                </span>
                <span class="font-mono flex items-center gap-2">
                   <span class="relative flex h-2.5 w-2.5">
-                    <span v-if="['downloading', 'pending_download', 'moving', 'seeding'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': selected?.taskStatus === 'seeding' }"></span>
+                    <span v-if="['downloading', 'pending_download', 'moving', 'seeding', 'fetching_metadata'].includes(selected?.taskStatus || '')" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75" :class="{ 'bg-purple-500': selected?.taskStatus === 'seeding' }"></span>
                     <span class="relative inline-flex rounded-full h-2.5 w-2.5" 
                       :class="{
-                        'bg-blue-500': ['downloading', 'pending_download', 'moving'].includes(selected?.taskStatus || ''),
+                        'bg-blue-500': ['downloading', 'pending_download', 'moving', 'fetching_metadata'].includes(selected?.taskStatus || ''),
                         'bg-purple-500': selected?.taskStatus === 'seeding',
                         'bg-green-500': selected?.taskStatus === 'completed',
-                        'bg-red-500': ['cancelled', 'error'].includes(selected?.taskStatus || ''),
+                        'bg-red-500': ['cancelled', 'error', 'fetching_metadata_failed'].includes(selected?.taskStatus || ''),
                         'bg-yellow-500': selected?.taskStatus === 'pending'
                       }"
                     ></span>

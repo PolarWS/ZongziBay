@@ -159,6 +159,10 @@ declare namespace API {
     filter?: Record<string, any> | null;
     /** Timestamp */
     timestamp?: string | null;
+    /** 搜索词是否被智能优化（如分词/回退） */
+    query_modified?: boolean | null;
+    /** 实际使用的搜索词（优化后） */
+    query_used?: string | null;
   };
 
   type AnimeGardenTeam = {
@@ -439,6 +443,8 @@ declare namespace API {
   };
 
   type DownloadTaskStatus =
+    | "fetching_metadata"
+    | "fetching_metadata_failed"
     | "downloading"
     | "pending_download"
     | "moving"

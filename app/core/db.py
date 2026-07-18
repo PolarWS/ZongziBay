@@ -178,7 +178,7 @@ class Database:
         conn = self.get_conn()
         cur = conn.cursor()
         cur.execute(
-            "SELECT * FROM download_task WHERE isDelete = 0 AND taskStatus NOT IN ('completed', 'error', 'paused', 'cancelled')"
+            "SELECT * FROM download_task WHERE isDelete = 0 AND taskStatus NOT IN ('completed', 'error', 'paused', 'cancelled', 'fetching_metadata_failed')"
         )
         rows = cur.fetchall()
         return [dict(row) for row in rows]

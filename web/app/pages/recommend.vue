@@ -217,6 +217,20 @@ const initFromRoute = () => {
 // 点击卡片时的搜索来源：海盗湾 | 动漫花园 | ASSRT字幕站（可从设置页偏好恢复）
 const DEFAULT_SEARCH_SOURCE_KEY = 'zongzi_default_search_source'
 const searchSource = ref<'piratebay' | 'anime' | 'assrt'>('piratebay')
+// 切到动漫时会强制跳转动漫花园；切回电影/剧集时恢复此前选择
+let searchSourceBeforeAnime: 'piratebay' | 'anime' | 'assrt' | null = null
+
+const applyAnimeSearchSource = () => {
+  if (searchSource.value === 'anime') return
+  searchSourceBeforeAnime = searchSource.value
+  searchSource.value = 'anime'
+}
+
+const restoreSearchSourceAfterAnime = () => {
+  if (searchSourceBeforeAnime == null) return
+  searchSource.value = searchSourceBeforeAnime
+  searchSourceBeforeAnime = null
+}
 
 const page = ref(1)
 
@@ -493,12 +507,18 @@ const onCardClick = (it: API.TMDBMovie | API.TMDBTV) => {
   }
 }
 
-// 点击本周新番条目：固定跳转动漫花园，用中文名搜索
+// 点击本周/季度新番条目：按 searchSource 跳转（切到动漫时会默认选中动漫花园）
 const goBangumiSearch = (it: API.BangumiCalendarItem) => {
   const name = getBangumiName(it)
   if (!name) return
   const tmdbYear = (it.air_date || '').slice(0, 4)
-  router.push({ path: '/anime', query: { q: name, tmdbName: name, tmdbYear } })
+  if (searchSource.value === 'piratebay') {
+    router.push({ path: '/piratebay', query: { q: name, tmdbName: name, tmdbYear } })
+  } else if (searchSource.value === 'assrt') {
+    router.push({ path: '/subtitle', query: { q: name, tmdbName: name, tmdbYear } })
+  } else {
+    router.push({ path: '/anime', query: { q: name, tmdbName: name, tmdbYear } })
+  }
 }
 
 const kindLabel = (k: string) => {
@@ -527,10 +547,15 @@ const selectSeasonKey = (s: SeasonKey) => {
   fetchList()
 }
 
-// 切换类型：修正非法列表种类，重置分页并拉取
+// 切换类型：修正非法列表种类，重置分页并拉取；动漫默认跳转动漫花园
 const selectMediaType = (t: 'movie' | 'tv' | 'anime') => {
   if (mediaType.value === t) return
   animateOnMount.value = false
+  if (t === 'anime') {
+    applyAnimeSearchSource()
+  } else if (mediaType.value === 'anime') {
+    restoreSearchSourceAfterAnime()
+  }
   mediaType.value = t
   if (!listKinds.value.includes(listKind.value)) {
     listKind.value = defaultKindFor(t)
@@ -563,6 +588,8 @@ onMounted(() => {
   if (saved === 'piratebay' || saved === 'anime' || saved === 'assrt') searchSource.value = saved
   loadImageDomain()
   initFromRoute()
+  // 直接打开动漫推荐页时，跳转源同步切到动漫花园
+  if (mediaType.value === 'anime') applyAnimeSearchSource()
   syncRoute()
   fetchList()
 })

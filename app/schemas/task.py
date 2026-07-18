@@ -6,6 +6,8 @@ from pydantic import BaseModel
 
 class DownloadTaskStatus(str, Enum):
     """下载任务状态"""
+    FETCHING_METADATA = "fetching_metadata"        # 新任务：等待 qB 获取种子元数据
+    FETCHING_METADATA_FAILED = "fetching_metadata_failed"  # 获取元数据失败（超时等）
     DOWNLOADING = "downloading"
     PENDING_DOWNLOAD = "pending_download"  # 字幕占位任务，后台尚未下载完成
     MOVING = "moving"

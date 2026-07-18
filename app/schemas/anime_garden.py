@@ -63,6 +63,8 @@ class AnimeGardenSearchResult(BaseModel):
     pagination: Optional[AnimeGardenPagination] = None
     filter: Optional[dict] = None
     timestamp: Optional[str] = None
+    query_modified: Optional[bool] = None      # 搜索词是否被智能优化（如分词/回退）
+    query_used: Optional[str] = None           # 实际使用的搜索词（优化后）
 
 
 class AnimeGardenTeam(BaseModel):

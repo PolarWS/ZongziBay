@@ -1,11 +1,13 @@
 export const DownloadTaskStatusMap: Record<string, string> = {
+  fetching_metadata: '获取下载信息',
+  fetching_metadata_failed: '获取信息失败',
   downloading: '下载中',
   pending_download: '待下载',
   moving: '移动中',
   seeding: '做种中',
   completed: '已完成',
   cancelled: '已取消',
-  error: '错误'
+  error: '错误',
 }
 
 export const FileTaskStatusMap: Record<string, string> = {

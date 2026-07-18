@@ -13,7 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { ExternalLink, Magnet, X } from 'lucide-vue-next'
+import { ExternalLink, Magnet, X, ArrowUpDown } from 'lucide-vue-next'
 
 const route = useRoute()
 const router = useRouter()
@@ -30,8 +30,59 @@ const customFansubInput = ref('')
 const selectedFansub = ref('')
 const page = ref(1)
 const pageSize = 20
+// API 声称已完成 —— 仅供参考，分页判断主要靠 hasMore（不信任 API 的 complete 字段）
 const apiComplete = ref(true)
+// 搜索词是否被后端智能优化（如分词/回退）
+const queryModified = ref(false)
+const queryUsed = ref('')
 const inputKeyword = ref('')
+
+// ---- 排序 ----
+type SortField = 'date' | 'size' | 'title'
+type SortOrder = 'asc' | 'desc'
+const SORT_OPTIONS: { field: SortField; label: string }[] = [
+  { field: 'date', label: '时间' },
+  { field: 'size', label: '大小' },
+  { field: 'title', label: '标题' },
+]
+const sortField = ref<SortField | null>(null)
+const sortOrder = ref<SortOrder>('desc')
+
+function toggleSort(field: SortField) {
+  if (sortField.value === field) {
+    // 同一字段：切换升序/降序/取消
+    if (sortOrder.value === 'desc') {
+      sortOrder.value = 'asc'
+    } else {
+      sortField.value = null
+      sortOrder.value = 'desc'
+    }
+  } else {
+    sortField.value = field
+    sortOrder.value = 'desc'
+  }
+}
+
+/** 当前排序后的列表（不影响原始 items，也不用 computed 避免每帧重建） */
+const sortedItems = computed(() => {
+  const list = [...items.value]
+  const field = sortField.value
+  if (!field) return list
+
+  const dir = sortOrder.value === 'asc' ? 1 : -1
+  return list.sort((a, b) => {
+    if (field === 'date') {
+      const ta = new Date(a.createdAt).getTime()
+      const tb = new Date(b.createdAt).getTime()
+      return dir * (ta - tb)
+    }
+    if (field === 'size') {
+      return dir * ((a.size || 0) - (b.size || 0))
+    }
+    // title
+    return dir * (a.title || '').localeCompare(b.title || '', 'zh-CN')
+  })
+})
 
 // 从路由与列表派生的计算属性
 const q = computed(() => (route.query.q as string) || '')
@@ -46,21 +97,27 @@ const fansubList = computed(() => {
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count)
 })
-// 列表直接使用接口返回的 items（字幕组筛选通过 API 的 fansub 参数完成）
-const filteredItems = computed(() => items.value)
+// 列表直接使用接口返回的 items（字幕组筛选通过 API 的 fansub 参数完成；排序由 sortedItems 处理）
+const filteredItems = computed(() => sortedItems.value)
+// 是否还有更多结果：以当页返回数是否满页来判断，不信任 API 的 complete 字段
+const hasMore = computed(() => items.value.length >= pageSize)
+// 用户到达过的最高页码，避免回第一页后丢失后面页码
+const maxKnownPage = ref(1)
 // 总数：API 仅在 complete 时可知；用于文案展示
 const totalCount = computed(() => {
   const base = (page.value - 1) * pageSize + items.value.length
-  if (apiComplete.value) return base
+  if (apiComplete.value && !hasMore.value) return base
+  if (apiComplete.value && hasMore.value) return base
   return Math.max(base, page.value * pageSize)
 })
-// 分页组件用 total：必须 total > pageSize 才会显示分页。未 complete 时至少设为 (page+1)*pageSize，保证“下一页”可点
+// 分页组件用 total。保留已知页码、当页满页时乐观假定下一页。
 const totalForPagination = computed(() => {
-  if (apiComplete.value) {
-    const total = (page.value - 1) * pageSize + items.value.length
-    return Math.max(total, 1)
+  const floor = maxKnownPage.value * pageSize   // 至少涵盖已访问过的最高页
+  if (hasMore.value) {
+    return Math.max((page.value + 1) * pageSize, floor)
   }
-  return (page.value + 1) * pageSize
+  const total = (page.value - 1) * pageSize + items.value.length
+  return Math.max(total, floor, 1)
 })
 const tmdbName = computed(() => (route.query.tmdbName as string) || '')
 const tmdbYear = computed(() => (route.query.tmdbYear as string) || '')
@@ -70,6 +127,7 @@ watch(() => q.value, (v) => {
   inputKeyword.value = v
   page.value = 1
   selectedFansub.value = ''
+  maxKnownPage.value = 1
   fetchData()
 }, { immediate: false })
 
@@ -95,6 +153,7 @@ function toggleFansub(name: string) {
   const next = selectedFansub.value === name ? '' : name
   selectedFansub.value = next
   page.value = 1
+  maxKnownPage.value = 1
   fetchData()
 }
 
@@ -130,16 +189,24 @@ function removeCustomTag(tag: string) {
 function clearFansub() {
   selectedFansub.value = ''
   page.value = 1
+  maxKnownPage.value = 1
   fetchData()
 }
 
-// 提交搜索：写入路由并触发 watch 拉数
+// 提交搜索：只更新关键词，保留 tmdbName/tmdbYear 供磁链页重命名使用
 function onSearch() {
   const v = inputKeyword.value.trim()
   if (!v) return
   page.value = 1
   selectedFansub.value = ''
-  router.replace({ path: '/anime', query: { q: v } })
+  router.replace({
+    path: '/anime',
+    query: {
+      q: v,
+      ...(tmdbName.value ? { tmdbName: tmdbName.value } : {}),
+      ...(tmdbYear.value ? { tmdbYear: tmdbYear.value } : {}),
+    },
+  })
 }
 
 // 请求动漫花园搜索接口
@@ -163,8 +230,20 @@ async function fetchData() {
       items.value = []
       return
     }
+    // 翻到没有结果的页 → 自动回退到上一页
+    if (data.resources.length === 0 && page.value > 1) {
+      page.value = Math.max(1, page.value - 1)
+      return // watch(page) 会重新触发 fetchData
+    }
     items.value = data.resources
+    // 记录成功到达的页码，避免回第一页后丢失后面的页码
+    if (data.resources.length > 0) {
+      maxKnownPage.value = Math.max(maxKnownPage.value, page.value)
+    }
     apiComplete.value = data.pagination?.complete ?? (data.resources.length < pageSize)
+    // 后端返回的搜索词优化标记
+    queryModified.value = !!data.query_modified
+    queryUsed.value = data.query_used || ''
   } catch (e: any) {
     errMsg.value = e?.message || '搜索失败'
     items.value = []
@@ -235,6 +314,37 @@ function formatDate(iso: string) {
       </form>
       <div v-if="q" class="flex flex-col gap-2">
         <p class="text-sm text-muted-foreground">当前搜索：{{ q }}</p>
+        <p v-if="queryModified && queryUsed && queryUsed !== q" class="text-xs text-amber-600 dark:text-amber-400">
+          💡 搜索词已自动优化，实际搜索：{{ queryUsed }}
+        </p>
+        <!-- 排序控件（仅当页排序，API 不支持服务端排序） -->
+        <div v-if="items.length > 0" class="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <ArrowUpDown class="w-3.5 h-3.5 shrink-0" />
+          <span class="mr-0.5">排序</span>
+          <Badge
+            v-for="opt in SORT_OPTIONS"
+            :key="opt.field"
+            :variant="sortField === opt.field ? 'default' : 'outline'"
+            class="cursor-pointer hover:opacity-80 select-none h-6 px-2 text-xs leading-none flex items-center gap-0.5 transition-colors"
+            @click="toggleSort(opt.field)"
+          >
+            {{ opt.label }}
+            <span v-if="sortField === opt.field" class="text-[10px] ml-0.5">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
+          </Badge>
+          <button
+            v-if="sortField"
+            class="inline-flex items-center justify-center rounded-full w-4 h-4 text-[10px] text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted transition-colors cursor-pointer shrink-0"
+            title="清除排序"
+            @click="sortField = null; sortOrder = 'desc'"
+          >
+            <X class="w-3 h-3" />
+          </button>
+          <span
+            v-if="sortField"
+            class="text-[10px] text-muted-foreground/40 select-none"
+            title="API 不支持服务端排序，仅对当前页结果排序"
+          >当页</span>
+        </div>
         <div class="flex flex-wrap gap-2 items-center">
           <Badge
             v-for="fs in fansubList"

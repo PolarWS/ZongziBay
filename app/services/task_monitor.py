@@ -119,8 +119,27 @@ class TaskMonitor:
                         continue
                     
                     # 正在下载/移动的任务在 qB 中消失，尝试重新推送
-                    if task['taskStatus'] in ('downloading', 'pending', 'moving'):
-                        logger.info(f"任务 {task['id']} 在 qBittorrent 中未找到，尝试重新推送...")
+                    # 同时处理 fetching_metadata 任务：新任务首次推送到 qB
+                    if task['taskStatus'] in ('downloading', 'pending', 'moving', 'fetching_metadata'):
+                        # fetching_metadata 超时检查（超过 5 分钟未成功视为失败）
+                        if task['taskStatus'] == 'fetching_metadata':
+                            try:
+                                from datetime import datetime
+                                created = datetime.strptime(task.get('createTime', ''), '%Y-%m-%d %H:%M:%S')
+                                elapsed = (datetime.now() - created).total_seconds()
+                                if elapsed > 300:  # 5 分钟超时
+                                    logger.warning(f"任务 {task['id']} 获取下载信息超时 ({elapsed:.0f}s)，标记为失败")
+                                    db.update_task_status(task['id'], 'fetching_metadata_failed')
+                                    db.insert_notification(
+                                        title="获取下载信息失败",
+                                        content=f"任务 {task['taskName']} 获取下载信息超时，请检查 qBittorrent 连接",
+                                        type=NotificationType.ERROR.value,
+                                    )
+                                    continue
+                            except (ValueError, TypeError):
+                                pass
+
+                        logger.info(f"任务 {task['id']} ({task['taskStatus']}) 在 qBittorrent 中未找到，尝试推送...")
                         try:
                             from app.services.task_service import task_service
                             file_tasks = db.get_file_tasks(task['id'])
@@ -133,13 +152,16 @@ class TaskMonitor:
                             )
                             if success:
                                 db.insert_notification(
-                                    title="任务已自动重推",
-                                    content=f"任务 {task['taskName']} 在 qB 中缺失，已尝试自动重推下载",
-                                    type=NotificationType.WARNING.value
+                                    title="任务已推送" if task['taskStatus'] == 'fetching_metadata' else "任务已自动重推",
+                                    content=f"任务 {task['taskName']} 已{'推送到 qB，开始获取下载信息' if task['taskStatus'] == 'fetching_metadata' else '自动重推下载'}",
+                                    type=NotificationType.INFO.value if task['taskStatus'] == 'fetching_metadata' else NotificationType.WARNING.value
                                 )
                                 continue
                         except Exception as e:
-                            logger.error(f"重推任务 {task['id']} 失败: {e}")
+                            logger.error(f"推送任务 {task['id']} 失败: {e}")
+                            if task['taskStatus'] == 'fetching_metadata':
+                                # 推送失败暂不标记为 completed/cancelled，等待下次重试（超时机制兜底）
+                                continue
 
                     # 无法重推或重推失败，标记为已取消
                     logger.info(f"任务 {task['id']} 在 qBittorrent 中未找到，且无法恢复，标记为已取消")
