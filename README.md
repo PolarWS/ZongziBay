@@ -52,11 +52,37 @@
 
 ## 测试
 
+### 后端（pytest）
+
 ```bash
 python -m pytest tests/ -v
 ```
 
-测试使用临时数据库，不影响本地数据。更多说明见 《[测试说明](/docs/readme_test.md)》
+共 **372 个测试用例**，覆盖：
+- API 冒烟测试（登录、Token 刷新、认证守卫、Cookie 认证）
+- JWT 中间件（白名单、Token 类型隔离、OPTIONS 放行）
+- 配置模块（默认合并、环境变量覆盖、完整性检测）
+- 密码哈希（PBKDF2-SHA256 编解码/验证、bcrypt）
+- 登录限流器（滑动窗口、封禁/解封、过期清理）
+- 数据模型（BaseResponse、BusinessException、ErrorCode、Bangumi/TMDB Schemas）
+- 异常处理器（业务异常、参数校验、HTTP 异常、全局兜底）
+- 服务层 mock 测试（Bangumi、TMDB、动漫花园、海盗湾、ASSRT 字幕、磁力链接）
+- qBittorrent 任务（TaskService：tracker 追加、路径解析、推送/取消、路径规范化）
+- 任务监控（单文件/嵌套检测、移动/复制决策、字幕任务复制、文件整理）
+
+### 前端（vitest）
+
+```bash
+cd web && npm run test
+```
+
+共 **76 个测试用例**，覆盖：
+- `utils/renamer.ts` — 智能重命名（电影/剧集/番剧模式、S/E 解析、中文集数、语言检测、自定义模板、force overrides）
+- `lib/renamer.ts` — 旧版重命名逻辑
+- `utils/crypto.ts` — SHA-256 哈希（Web Crypto API + crypto-js 降级）
+- **9 个流程测试**模拟真实种子下载场景（美剧多集、电影+字幕、番剧剧场版、动漫花园双语、OVA 特别篇等）
+
+测试使用 mock 隔离外部依赖，不依赖真实网络或 qBittorrent 实例。更多说明见 《[测试说明](/docs/readme_test.md)》
 
 ---
 
@@ -65,12 +91,21 @@ python -m pytest tests/ -v
 ```
 ├── app/                 # FastAPI 后端
 │   ├── api/v1/          # API 路由
-│   ├── core/            # 配置、数据库、qB 客户端、鉴权
-│   ├── resources/       # 内置资源
-│   ├── schemas/         # 请求/响应模型
-│   └── services/        # 任务、监控、磁力、字幕等业务逻辑
+│   ├── core/            # 配置、数据库、qB 客户端、鉴权、限流
+│   ├── resources/       # 内置资源（默认配置）
+│   ├── schemas/         # 请求/响应 Pydantic 模型
+│   └── services/        # 任务、监控、磁力、字幕、TMDB、Bangumi 等业务逻辑
 ├── web/                 # Nuxt 3 前端
-├── tests/               # pytest 测试
+│   ├── app/
+│   │   ├── components/  # Vue 组件
+│   │   ├── composables/ # 组合式函数（useAuth 等）
+│   │   ├── lib/         # 工具库（重命名等）
+│   │   ├── pages/       # 页面路由
+│   │   └── utils/       # 工具函数（重命名、加密等）
+│   ├── vitest.config.ts # 前端测试配置
+│   └── package.json
+├── tests/               # 后端 pytest 测试（372 用例）
+├── .github/workflows/   # CI/CD（前后端自动化测试）
 └── requirements.txt
 ```
 

@@ -167,3 +167,56 @@ class TestPasswordHashing:
         access = create_access_token(data={"sub": "user"})
         with _patch_secret, _patch_algo:
             assert decode_refresh_token(access) is None
+
+
+# ---------------------------------------------------------------------------
+# PBKDF2 兼容层测试（is_pbkdf2_hash / PBKDF2 验证）
+# ---------------------------------------------------------------------------
+
+class TestPBKDF2Compatibility:
+    """is_pbkdf2_hash 和旧版 PBKDF2 密码验证兼容"""
+
+    def test_is_pbkdf2_hash_true(self):
+        from app.core.security import is_pbkdf2_hash
+        assert is_pbkdf2_hash("pbkdf2_sha256$310000$abc123$xyz789") is True
+
+    def test_is_pbkdf2_hash_false_for_bcrypt(self):
+        from app.core.security import is_pbkdf2_hash
+        assert is_pbkdf2_hash("$2b$12$abc123") is False
+
+    def test_is_pbkdf2_hash_false_for_plaintext(self):
+        from app.core.security import is_pbkdf2_hash
+        assert is_pbkdf2_hash("admin") is False
+        assert is_pbkdf2_hash("") is False
+
+    def test_is_hashed_true_for_pbkdf2(self):
+        """is_hashed 应同时识别 bcrypt 和 PBKDF2"""
+        from app.core.security import is_hashed
+        assert is_hashed("pbkdf2_sha256$310000$salt$digest") is True
+        assert is_hashed("$2b$12$" + "a" * 53) is True
+
+    def test_verify_password_with_pbkdf2_hash(self):
+        """verify_password 支持旧版 PBKDF2 哈希验证"""
+        import hashlib, base64, secrets
+        salt = secrets.token_bytes(16)
+        iterations = 100000
+        password = "test_password"
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+        salt_b64 = base64.urlsafe_b64encode(salt).decode("utf-8").rstrip("=")
+        digest_b64 = base64.urlsafe_b64encode(dk).decode("utf-8").rstrip("=")
+        pbkdf2_hash = f"pbkdf2_sha256${iterations}${salt_b64}${digest_b64}"
+
+        from app.core.security import verify_password as sec_verify
+        assert sec_verify(password, pbkdf2_hash) is True
+        assert sec_verify("wrong_password", pbkdf2_hash) is False
+
+    def test_verify_password_pbkdf2_invalid_format(self):
+        from app.core.security import verify_password as sec_verify
+        assert sec_verify("test", "pbkdf2_sha256$bad") is False
+
+    def test_verify_password_with_bcrypt(self):
+        """verify_password 对 bcrypt 哈希仍正常工作"""
+        from app.core.security import hash_password as sec_hash, verify_password as sec_verify
+        hashed = sec_hash("mypassword")
+        assert sec_verify("mypassword", hashed) is True
+        assert sec_verify("wrong", hashed) is False
