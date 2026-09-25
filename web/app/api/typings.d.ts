@@ -151,7 +151,7 @@ declare namespace API {
     /** Status */
     status: string;
     /** Complete */
-    complete: boolean;
+    complete?: boolean | null;
     /** Resources */
     resources: AnimeGardenResource[];
     pagination?: AnimeGardenPagination | null;

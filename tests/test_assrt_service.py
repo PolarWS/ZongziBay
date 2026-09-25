@@ -469,3 +469,97 @@ class TestAssrtErrorMessages:
         assert ASSRT_ERROR_MESSAGES[20001] == "Token不存在或无效"
         assert ASSRT_ERROR_MESSAGES[30000] == "服务器异常"
         assert ASSRT_ERROR_MESSAGES[30900] == "请求配额超限"
+
+
+# ---------------------------------------------------------------------------
+# 旧版 assrt 接口字段兼容（镜像站如 api.makedie.me 仍返回旧版字段）
+# ---------------------------------------------------------------------------
+
+class TestLegacyFormatCompat:
+    """旧版字段（fileid/m_subtype/m_langn）应被正确映射为新版字段。
+
+    回归背景：部分可用镜像返回的是旧版结构，缺少 id/native_name/upload_time，
+    旧实现直接按 s.get("id") 过滤，导致搜索结果恒为 0 条。
+    """
+
+    @staticmethod
+    def _legacy_item():
+        """一条真实旧版响应样例（字段截取自 api.makedie.me）。"""
+        return {
+            "videoname": "Show.S01E01.1080p.WEB-GRACE",
+            "video_chinese_name": "剧名/第一集",
+            "revision": "0",
+            "uploadtime": "2026-09-18 07:59:54",
+            "fileid": "801535",
+            "subtype": "2",
+            "m_subtype": "Subrip(srt)",
+            "m_title_bot": "剧名 第一集",
+            "m_lang": "英&nbsp;简&nbsp;繁&nbsp;双语",
+            "m_langn": ["langeng", "langchs", "langcht", "langdou"],
+            "m_extras": {"langeng": "1", "langchs": "1", "langcht": "1", "langdou": "1"},
+            "score": "7",
+            "score_cnt": "0",
+        }
+
+    @patch("app.services.assrt_service.config")
+    @patch("app.services.assrt_service.requests.get")
+    def test_legacy_item_is_parsed(self, mock_get, mock_config):
+        mock_config.get.side_effect = lambda key, default=None: {
+            "subtitle.assrt.token": "x" * 32,
+            "subtitle.assrt.base_url": "http://api.makedie.me",
+        }.get(key, default)
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"status": 0, "sub": {"subs": [self._legacy_item()]}}
+        mock_get.return_value = mock_resp
+
+        items, total = AssrtService().search_subs("Test S01E01")
+
+        assert total == 1
+        item = items[0]
+        # fileid -> id
+        assert item.id == 801535
+        # m_title_bot -> native_name
+        assert item.native_name == "剧名 第一集"
+        # uploadtime -> upload_time
+        assert item.upload_time == "2026-09-18 07:59:54"
+        # m_subtype 优先于数字代号 subtype
+        assert item.subtype == "Subrip(srt)"
+        # score -> vote_score
+        assert item.vote_score == 7
+        # m_langn + m_extras -> lang.langlist
+        assert item.lang is not None
+        assert item.lang.langlist.langchs is True
+        assert item.lang.langlist.langeng is True
+        assert item.lang.langlist.langcht is True
+        assert item.lang.langlist.langdou is True
+        # m_lang -> desc（含 &nbsp; 原样保留）
+        assert "英" in item.lang.desc
+
+    def test_legacy_item_without_valid_fileid_is_skipped(self):
+        from app.services.assrt_service import _has_sub_id
+
+        assert _has_sub_id({"fileid": "801535"}) is True
+        assert _has_sub_id({"id": 123}) is True
+        assert _has_sub_id({"fileid": ""}) is False
+        assert _has_sub_id({"fileid": "abc"}) is False
+        assert _has_sub_id({"fileid": None}) is False
+        assert _has_sub_id("not-a-dict") is False
+
+    def test_new_format_is_not_rewritten(self):
+        """新版响应必须原样通过，不能被兼容逻辑改动。"""
+        from app.services.assrt_service import _normalize_sub_raw
+
+        raw = {
+            "id": 999,
+            "native_name": "New.Format",
+            "upload_time": "2026-01-01",
+            "subtype": "ass",
+            "lang": {"langlist": {"langchs": True}, "desc": "简体"},
+        }
+        out = _normalize_sub_raw(dict(raw))
+        assert out["id"] == 999
+        assert out["native_name"] == "New.Format"
+        assert out["upload_time"] == "2026-01-01"
+        assert out["subtype"] == "ass"
+        assert out["lang"] == raw["lang"]

@@ -266,13 +266,13 @@ const fetchFiles = async () => {
         const ext = getExt(it.name || it.path || '')
         const name = it.name || it.path || ''
         let checked = defaultCheckedExts.includes(ext)
+        // 字幕一律默认勾选：字幕体积很小，且随种子附带的字幕天然与片源版本匹配。
+        // 旧逻辑只勾选文件名含 Chinese/中文/CHS/CHT 的字幕，会把 YIFY 这类
+        // 不带语言标记的 .srt 默认排除（priority=0 → 根本不下载），
+        // 结果就是片子下完了却没有任何字幕。
         const subExts = ['.srt', '.ass', '.ssa', '.vtt', '.sub', '.idx']
         if (subExts.includes(ext)) {
-          if (name.includes('Chinese') || name.includes('中文') || name.includes('CHS') || name.includes('CHT')) {
-            checked = true
-          } else {
-            checked = false
-          }
+          checked = true
         }
         return {
           ...it,

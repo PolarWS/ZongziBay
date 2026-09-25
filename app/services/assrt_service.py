@@ -125,7 +125,109 @@ def _parse_lang(raw: Any) -> Optional[AssrtLang]:
     return AssrtLang(langlist=langlist, desc=raw.get("desc"))
 
 
+def _lang_from_m_lang(raw: Dict[str, Any]) -> Optional[AssrtLang]:
+    """从旧版 assrt 接口的字段构造语言信息。
+
+    旧版响应里语种信息分散在两处：
+      - m_langn: ["langeng", "langchs", ...]  语种键名列表
+      - m_extras: {"langeng": "1", "langchs": "1", ...} 各语种开关
+      - m_lang:  "英&nbsp;简&nbsp;繁&nbsp;双语"  人类可读描述
+    """
+    keys = raw.get("m_langn")
+    if not isinstance(keys, (list, tuple)):
+        keys = []
+    extras = raw.get("m_extras") if isinstance(raw.get("m_extras"), dict) else {}
+    values: Dict[str, bool] = {}
+    for k in keys:
+        if not isinstance(k, str):
+            continue
+        if k in AssrtLangList.model_fields:
+            values[k] = True
+    # 兜底：m_extras 里直接带 langxxx 开关
+    for k in ("langchs", "langcht", "langeng", "langjpn", "langkor", "langdou"):
+        if k in extras and k in AssrtLangList.model_fields:
+            values.setdefault(k, bool(extras.get(k) not in (None, "", "0", 0, False)))
+    if not values:
+        return None
+    try:
+        langlist = AssrtLangList(**values)
+    except Exception:
+        return None
+    desc = raw.get("m_lang")
+    return AssrtLang(langlist=langlist, desc=str(desc) if desc else None)
+
+
+def _normalize_sub_raw(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """兼容旧版 assrt 接口字段名。
+
+    官方当前接口返回 id / native_name / upload_time / subtype 等字段，但部分
+    镜像（如 api.makedie.me）仍返回旧版字段：fileid / m_title_bot / uploadtime /
+    m_subtype / m_langn。这里统一映射为新版字段名，避免解析出 0 条结果。
+    """
+    if not isinstance(raw, dict):
+        return raw
+    if raw.get("id") or not raw.get("fileid"):
+        return raw
+    out = dict(raw)
+    # id <- fileid（可能是字符串或数字）
+    try:
+        out["id"] = int(str(raw.get("fileid")).strip())
+    except (TypeError, ValueError):
+        return raw
+    out.setdefault("native_name", raw.get("m_title_bot") or raw.get("m_title"))
+    out.setdefault("upload_time", raw.get("uploadtime"))
+    # subtype: 旧版 subtype 是数字代号，m_subtype 才是可读名（如 Subrip(srt)）
+    out["subtype"] = raw.get("m_subtype") or raw.get("subtype")
+    # 语种：旧版用 m_langn/m_extras，新版是嵌套 lang.langlist
+    if not isinstance(out.get("lang"), dict):
+        lang = _lang_from_m_lang(raw)
+        if lang is not None:
+            out["lang"] = lang.model_dump()
+    if "vote_score" not in out:
+        try:
+            out["vote_score"] = int(float(raw.get("score") or 0))
+        except (TypeError, ValueError):
+            out["vote_score"] = 0
+    return out
+
+
+# ASSRT 文件服务器：国内网络下 HTTP(80) 会在握手阶段被 RST，
+# 同一主机改用 HTTPS(443) 却能通（但仍有较大概率被重置，需要重试）。
+_SUBTITLE_DOWNLOAD_RETRY = 25
+
+
+def _subtitle_url_candidates(url: str) -> List[str]:
+    """生成字幕下载的候选 URL：强制 https，并重复多次以便重试。
+
+    ASSRT API 返回的下载链接形如 http://file1.assrt.net/...，
+    直接请求会 ConnectionResetError；改成 https 后可正常下载。
+    """
+    if not url:
+        return []
+    u = url.strip()
+    if u.startswith("http://"):
+        u = "https://" + u[len("http://"):]
+    return [u] * _SUBTITLE_DOWNLOAD_RETRY
+
+
+def _has_sub_id(raw: Any) -> bool:
+    """判断一条字幕记录是否带有可用 ID（兼容旧版 fileid 字段）。"""
+    if not isinstance(raw, dict):
+        return False
+    if raw.get("id"):
+        return True
+    fid = raw.get("fileid")
+    if fid is None or fid == "":
+        return False
+    try:
+        int(str(fid).strip())
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def _sub_item_from_raw(raw: Dict[str, Any]) -> AssrtSubItem:
+    raw = _normalize_sub_raw(raw)
     lang = _parse_lang(raw.get("lang"))
     return AssrtSubItem(
         id=raw.get("id", 0),
@@ -243,7 +345,7 @@ class AssrtService:
         data = self._request("/sub/search", params)
         sub = data.get("sub") or {}
         subs = sub.get("subs") or []
-        items = [_sub_item_from_raw(s) for s in subs if isinstance(s, dict) and s.get("id")]
+        items = [_sub_item_from_raw(s) for s in subs if _has_sub_id(s)]
         total = len(items)
         return items, total
 
@@ -265,7 +367,7 @@ class AssrtService:
         data = self._request("/sub/similar", {"id": sub_id})
         sub = data.get("sub") or {}
         subs = sub.get("subs") or []
-        return [_sub_item_from_raw(s) for s in subs if isinstance(s, dict) and s.get("id")]
+        return [_sub_item_from_raw(s) for s in subs if _has_sub_id(s)]
 
     def get_quota(self) -> int:
         """获取当前 API 配额（次/分钟）。"""
@@ -299,20 +401,33 @@ class AssrtService:
         safe = re.sub(r"[^\w\-. ]", "_", filename).strip() or f"sub_{sub_id}"
         filename = safe[:200] if len(safe) > 200 else safe
         saved_path = os.path.join(download_dir, filename)
-        try:
-            r = requests.get(file_url, timeout=30, stream=True)
-            r.raise_for_status()
-            with open(saved_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-        except requests.RequestException as e:
-            logger.warning("字幕 HTTP 下载失败 %s: %s", file_url, e)
-            raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message=f"下载失败: {e}")
-        except OSError as e:
-            logger.warning("字幕写入失败 %s: %s", saved_path, e)
-            raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message=f"保存失败: {e}")
-        return os.path.abspath(saved_path), filename
+        urls = _subtitle_url_candidates(file_url)
+        last_err: Optional[Exception] = None
+        for attempt, url in enumerate(urls, 1):
+            try:
+                r = requests.get(url, timeout=30, stream=True)
+                r.raise_for_status()
+                with open(saved_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                if attempt > 1:
+                    logger.info("字幕下载第 %d 次尝试成功: %s", attempt, url)
+                return os.path.abspath(saved_path), filename
+            except requests.RequestException as e:
+                last_err = e
+                # 半途失败可能留下不完整文件，删掉再来
+                if os.path.exists(saved_path):
+                    try:
+                        os.remove(saved_path)
+                    except OSError:
+                        pass
+                continue
+            except OSError as e:
+                logger.warning("字幕写入失败 %s: %s", saved_path, e)
+                raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message=f"保存失败: {e}")
+        logger.warning("字幕下载失败（已尝试 %d 次，https） %s: %s", len(urls), file_url, last_err)
+        raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message=f"下载失败: {last_err}")
 
     def _create_subtitle_download_task_with_detail(
         self,
