@@ -5,6 +5,7 @@ export const DownloadTaskStatusMap: Record<string, string> = {
   pending_download: '待下载',
   moving: '移动中',
   seeding: '做种中',
+  paused: '已暂停',
   completed: '已完成',
   cancelled: '已取消',
   error: '错误',

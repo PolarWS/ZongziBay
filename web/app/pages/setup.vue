@@ -28,6 +28,7 @@ import {
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { sha256 } from '@/utils/crypto'
+import { mergeEnvPlain, parseEnvConfig } from '@/utils/envConfigPrefill'
 import {
   Dialog,
   DialogContent,
@@ -250,17 +251,29 @@ async function checkStatus() {
 async function loadEnvConfig() {
   try {
     const res = await getEnvConfigApiV1SystemEnvConfigGet({ skipErrorHandler: true })
-    if (res.data?.parsed) {
-      const p = res.data.parsed
-      if (p.username && !username.value) username.value = p.username
-      if (p.password && !password.value) password.value = p.password
-      if (p.tmdb_api_key && !tmdbApiKey.value) tmdbApiKey.value = p.tmdb_api_key
-      if (p.assrt_token && !assrtToken.value) assrtToken.value = p.assrt_token
-      if (p.qb_host && !qbHost.value) qbHost.value = p.qb_host
-      if (p.qb_username && !qbUsername.value) qbUsername.value = p.qb_username
-      if (p.qb_password && !qbPassword.value) qbPassword.value = p.qb_password
-      if (p.qb_api_key && !qbApiKey.value) qbApiKey.value = p.qb_api_key
-    }
+    const { plain, configured } = parseEnvConfig(res.data?.parsed)
+
+    // 非敏感字段（用户名、地址）：后端返回真值，可直接预填。
+    // 注意是「覆盖」而非「为空才填」——本函数在 loadExistingConfig() 之后执行，
+    // 那个函数已经用 config.yml 的模板默认值（qbittorrent.host 默认
+    // http://localhost:8080）占好了位。带守卫的话环境变量永远填不进去，
+    // 容器里就会拿 localhost 去连——那指向 app 自己，不是下载器容器。
+    const merged = mergeEnvPlain(
+      { username: username.value, qbHost: qbHost.value, qbUsername: qbUsername.value },
+      plain,
+    )
+    username.value = merged.username
+    qbHost.value = merged.qbHost
+    qbUsername.value = merged.qbUsername
+
+    // 敏感字段（密码、API Key）：后端只返回「已注入」布尔标记，绝不返回明文。
+    // 这里只能标记为已配置，让用户留空保持不变；若当作明文填入会得到字面量
+    // "true"，提交后成为真实密码/密钥。
+    if (configured.password) existingFields.password = true
+    if (configured.qbPassword) existingFields.qbPassword = true
+    if (configured.qbApiKey) existingFields.qbApiKey = true
+    if (configured.tmdbApiKey) existingFields.tmdbApiKey = true
+    if (configured.assrtToken) existingFields.assrtToken = true
   } catch {
     // nothing
   }
@@ -709,7 +722,7 @@ onMounted(async () => {
                 <EyeOff v-else class="w-4 h-4" />
               </button>
             </div>
-            <p class="text-xs text-muted-foreground/60 mt-1.5">如通过 Docker 环境变量注入，字段会自动填充</p>
+            <p class="text-xs text-muted-foreground/60 mt-1.5">如通过 Docker 环境变量注入，字段会标记为已配置，留空即保持不变</p>
           </div>
           <div class="space-y-1.5">
             <Label for="sk" class="text-sm font-medium text-foreground/75">JWT 密钥 <span class="text-red-500">*</span></Label>

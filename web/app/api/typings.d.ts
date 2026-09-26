@@ -449,6 +449,7 @@ declare namespace API {
     | "pending_download"
     | "moving"
     | "seeding"
+    | "paused"
     | "completed"
     | "cancelled"
     | "error";
