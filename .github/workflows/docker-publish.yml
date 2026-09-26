@@ -1,0 +1,107 @@
+# 打 tag 时自动构建 amd64 + arm64 镜像并推送到 Docker Hub
+#
+# 首次使用前需要在仓库里配置两个 Secret（Settings → Secrets and variables → Actions）：
+#   DOCKERHUB_USERNAME  Docker Hub 用户名（polarws）
+#   DOCKERHUB_TOKEN     Docker Hub 访问令牌（Account Settings → Personal access tokens，
+#                       权限给 Read & Write；不要用账号密码）
+name: Docker Publish
+
+on:
+  push:
+    tags: ['v*']
+  # 手动补发：填不带 v 的版本号即可
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要发布的版本号（不带 v 前缀），例如 1.0.0-rc.10'
+        required: true
+
+# 同一个 tag 重复推送时只保留最后一次，避免两个任务同时推同一个标签
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: polarws/zongzibay
+
+jobs:
+  # ─── 发布前先跑一遍后端测试 ─────────────────────────────────
+  # 推送镜像到 Docker Hub 之后很难收回（别人可能已经拉走了），
+  # 所以这里挡一道：测试不过就不发。
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short
+
+  # ─── 多架构构建与推送 ───────────────────────────────────────
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 要在 amd64 的 runner 上构建，靠 QEMU 模拟
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 从 git tag 推导镜像标签：v1.0.0-rc.10 → 1.0.0-rc.10 和 latest
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=${{ inputs.version || 'manual' }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=ZongziBay
+            org.opencontainers.image.description=粽子湾 —— 影视下载管理与自动归档
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            TZ=Asia/Shanghai
+          # 关掉 provenance 证明：它会在 manifest list 里塞进 unknown/unknown 条目，
+          # 老版本 Docker（NAS 上很常见）拉到这种 manifest 会报
+          # "no matching manifest for linux/amd64 in the manifest list entries"
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### 已发布 ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "平台：linux/amd64, linux/arm64" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

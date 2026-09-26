@@ -1,0 +1,10 @@
+# 统一行尾符，避免 Windows 上 core.autocrlf=true 把脚本签出成 CRLF
+#
+# .sh 带 CRLF 时 bash 会把 \r 当成命令的一部分，轻则变量值多出尾随 \r，
+# 重则 "bad interpreter"。Dockerfile 里那句
+#   RUN sed -i 's/\r$//' entrypoint.sh
+# 就是在绕过这个问题——有了下面这条就不用再靠兜底了。
+*.sh        text eol=lf
+
+# Dockerfile 带 CRLF 时 RUN 指令会报难查的语法错误
+Dockerfile  text eol=lf
