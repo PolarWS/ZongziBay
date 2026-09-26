@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+import ssl
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -20,6 +21,31 @@ from app.schemas.base import BusinessException, ErrorCode
 from app.schemas.notification import NotificationType
 
 logger = logging.getLogger(__name__)
+
+
+def _friendly_net_error(e: Exception) -> str:
+    """把网络异常的原始文本压成一句用户能看懂的话。
+
+    requests 抛出的文本形如
+      HTTPSConnectionPool(host='file1.assrt.net', port=443): Max retries exceeded
+      with url: /onthefly/... (Caused by SSLError(SSLEOFError(8, '[SSL: ...')))
+    它会被原样塞进通知和接口响应，用户看到只会一头雾水。真实原因仍然由调用方
+    写进日志，这里只负责给用户一句结论。
+    """
+    reason: Any = e
+    # requests 把底层原因挂在 __cause__ 上，逐层剥到最内层才能认出真实类型
+    for _ in range(5):
+        inner = getattr(reason, "__cause__", None)
+        if inner is None:
+            break
+        reason = inner
+    if isinstance(reason, ssl.SSLError):
+        return "与字幕服务器建立安全连接时被中断，请稍后重试"
+    if isinstance(reason, (requests.ConnectTimeout, requests.ReadTimeout, TimeoutError)):
+        return "连接字幕服务器超时，请稍后重试"
+    if isinstance(reason, requests.ConnectionError):
+        return "无法连接到字幕服务器，请检查网络后重试"
+    return "请求字幕服务器失败，请稍后重试"
 
 
 def _resolve_download_path(relative_path: str) -> str:
@@ -315,10 +341,15 @@ class AssrtService:
                     code=ErrorCode.SYSTEM_ERROR.code,
                     message="ASSRT 请求过于频繁(429)，请稍后再试",
                 )
-            raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message=f"请求字幕服务失败: {e}")
+            raise BusinessException(
+                code=ErrorCode.SYSTEM_ERROR.code,
+                message=f"请求字幕服务失败（HTTP {code}），请稍后重试",
+            )
         except requests.RequestException as e:
             logger.warning("ASSRT 请求失败 %s: %s", url, e)
-            raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message=f"请求字幕服务失败: {e}")
+            raise BusinessException(
+                code=ErrorCode.SYSTEM_ERROR.code, message=_friendly_net_error(e)
+            )
         if not isinstance(data, dict):
             raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message="字幕服务返回格式异常")
         _raise_if_error(data)
@@ -385,6 +416,14 @@ class AssrtService:
         """HTTP 下载字幕到临时目录，返回 (绝对路径, 文件名)。"""
         if not download_dir:
             download_dir = _get_subtitle_download_dir()
+        # 调用方显式传 download_path 时走的是 _resolve_download_path，不经过
+        # _get_subtitle_download_dir_for_target，目录不会被创建，open() 会直接
+        # FileNotFoundError（用户看到「保存失败: [Errno 2] No such file or directory」）。
+        # 这里统一兜底创建；失败只记日志，让后面的报错保留真实原因。
+        try:
+            os.makedirs(download_dir, exist_ok=True)
+        except OSError as e:
+            logger.warning("创建字幕下载目录失败 %s: %s", download_dir, e)
         if file_index is not None and detail.filelist:
             idx = int(file_index)
             if idx < 0 or idx >= len(detail.filelist):
@@ -427,7 +466,9 @@ class AssrtService:
                 logger.warning("字幕写入失败 %s: %s", saved_path, e)
                 raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message=f"保存失败: {e}")
         logger.warning("字幕下载失败（已尝试 %d 次，https） %s: %s", len(urls), file_url, last_err)
-        raise BusinessException(code=ErrorCode.SYSTEM_ERROR.code, message=f"下载失败: {last_err}")
+        raise BusinessException(
+            code=ErrorCode.SYSTEM_ERROR.code, message=_friendly_net_error(last_err)
+        )
 
     def _create_subtitle_download_task_with_detail(
         self,
@@ -608,6 +649,7 @@ class AssrtService:
             logger.warning("字幕任务 %s file_tasks 数量与 items 不一致，按最小长度处理", task_id)
         ok_count = 0
         fail_count = 0
+        last_err_msg = ""
         for i, (file_index, _file_rename) in enumerate(items):
             if i >= len(file_tasks):
                 break
@@ -618,6 +660,7 @@ class AssrtService:
             except Exception as e:
                 fail_count += 1
                 err_msg = getattr(e, "message", None) or str(e)
+                last_err_msg = err_msg
                 logger.exception("字幕任务 %s 第 %s 个文件下载失败: %s", task_id, i, e)
                 db.update_file_task_status(file_tasks[i]["id"], "failed", err_msg)
                 db.insert_notification(
@@ -629,7 +672,10 @@ class AssrtService:
             db.update_download_task_name_and_status(task_id, task_name, "error", task_info=task_name)
             db.insert_notification(
                 title="字幕任务失败",
-                content=f"字幕「{task_name}」全部 {fail_count or len(items)} 个文件下载失败，任务已终止",
+                content=(
+                    f"字幕「{task_name}」全部 {fail_count or len(items)} 个文件下载失败，任务已终止"
+                    + (f"：{last_err_msg}" if last_err_msg else "")
+                ),
                 type=NotificationType.ERROR.value,
             )
             return

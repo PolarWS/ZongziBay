@@ -3,11 +3,16 @@ ASSRT 字幕服务单元测试（mock HTTP）
 覆盖：搜索、详情、相似字幕、配额、错误处理、URL 解析
 不依赖真实 ASSRT API 或数据库
 """
+import os
+import ssl
+
 import pytest
+import requests
 from unittest.mock import MagicMock, patch
 
 from app.services.assrt_service import (
     AssrtService,
+    _friendly_net_error,
     _raise_if_error,
     _resolve_download_path,
     _choose_subtitle_download_relative_by_target,
@@ -563,3 +568,101 @@ class TestLegacyFormatCompat:
         assert out["upload_time"] == "2026-01-01"
         assert out["subtype"] == "ass"
         assert out["lang"] == raw["lang"]
+
+
+# ---------------------------------------------------------------------------
+# _friendly_net_error
+# ---------------------------------------------------------------------------
+
+class TestFriendlyNetError:
+    """原始异常文本不能出现在用户可见的消息里，但结论要能区分原因"""
+
+    def test_ssl_error(self):
+        msg = _friendly_net_error(ssl.SSLEOFError(8, "[SSL: UNEXPECTED_EOF_WHILE_READING]"))
+        assert "安全连接" in msg
+        assert "SSLEOFError" not in msg and "file1.assrt.net" not in msg
+
+    def test_unwraps_nested_cause(self):
+        """requests 把真实原因挂在 __cause__ 上，必须剥到最内层"""
+        inner = ssl.SSLEOFError(8, "EOF occurred in violation of protocol")
+        wrapped = requests.ConnectionError("Max retries exceeded")
+        wrapped.__cause__ = inner
+        outer = requests.ConnectionError(
+            "HTTPSConnectionPool(host='file1.assrt.net', port=443)"
+        )
+        outer.__cause__ = wrapped
+        assert "安全连接" in _friendly_net_error(outer)
+
+    def test_timeout(self):
+        assert "超时" in _friendly_net_error(requests.ConnectTimeout("timed out"))
+        assert "超时" in _friendly_net_error(requests.ReadTimeout("timed out"))
+
+    def test_connection_error(self):
+        assert "无法连接" in _friendly_net_error(
+            requests.ConnectionError("Connection refused")
+        )
+
+    def test_unknown_falls_back_to_generic(self):
+        msg = _friendly_net_error(ValueError("something odd"))
+        assert "字幕服务器" in msg
+        assert "something odd" not in msg
+
+    def test_none_does_not_raise(self):
+        """last_err 理论上可能是 None，不能因此炸掉"""
+        assert isinstance(_friendly_net_error(None), str)
+
+
+# ---------------------------------------------------------------------------
+# _download_sub_to_path
+# ---------------------------------------------------------------------------
+
+class TestDownloadSubToPath:
+    """下载目录不存在时必须先创建。
+
+    缺陷：调用方显式传 download_path 时走 _resolve_download_path，不经过
+    _get_subtitle_download_dir_for_target，目录不会被创建，open(..., "wb")
+    直接 FileNotFoundError（用户看到「保存失败: [Errno 2] No such file or directory」）。
+    """
+
+    def _detail(self):
+        return AssrtSubDetail(
+            id=173817,
+            filename="2010_Sintel.UTF-8.tw.rar",
+            url="https://file1.assrt.net/onthefly/173817/-/1/x.rar",
+        )
+
+    @patch("app.services.assrt_service.requests.get")
+    def test_creates_missing_download_dir(self, mock_get, tmp_path):
+        target_dir = tmp_path / "not" / "yet" / "created"
+        assert not target_dir.exists()
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.iter_content.return_value = [b"subtitle-bytes"]
+        mock_get.return_value = mock_resp
+
+        saved, filename = AssrtService()._download_sub_to_path(
+            self._detail(), 173817, download_dir=str(target_dir)
+        )
+
+        assert target_dir.is_dir()
+        assert (target_dir / filename).read_bytes() == b"subtitle-bytes"
+        assert saved == os.path.abspath(os.path.join(str(target_dir), filename))
+
+    @patch("app.services.assrt_service.requests.get")
+    def test_existing_download_dir_untouched(self, mock_get, tmp_path):
+        """目录已存在时不应报错，也不该改动已有内容。"""
+        existing = tmp_path / "dl"
+        existing.mkdir()
+        (existing / "keep.txt").write_text("keep", encoding="utf-8")
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.iter_content.return_value = [b"x"]
+        mock_get.return_value = mock_resp
+
+        AssrtService()._download_sub_to_path(
+            self._detail(), 173817, download_dir=str(existing)
+        )
+
+        assert (existing / "keep.txt").read_text(encoding="utf-8") == "keep"
