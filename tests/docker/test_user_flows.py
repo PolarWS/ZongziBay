@@ -624,12 +624,17 @@ def flow_f8_subtitle(api, ctx, reset):
               f"{len(sim.get('items') or [])} 条")
 
     # 单条下载 → 生成任务。字幕包由 ASSRT 的文件服务器（file1.assrt.net）提供，
-    # 该域名在受限网络下不可达；此时接口会明确回报网络错误，据此区分「产品问题」与「环境问题」。
+    # 该域名的 TLS 握手会被链路按 SNI 选择性掐断（同一 IP 上 api.assrt.net 正常，
+    # file1/glb 被 reset），且时好时坏；此时接口会回报可读的网络错误，
+    # 据此区分「产品问题」与「环境问题」。
     dl = body_of(api.post("/subtitle/sub/download",
                           params={"id": sid, "target_path": FLOW_TARGET}, timeout=180))
     tid = (dl.get("data") or {}).get("task_id")
     dl_msg = str(dl.get("message") or "")
-    unreachable = any(k in dl_msg for k in ("Max retries", "SSLError", "file1.assrt.net"))
+    unreachable = any(k in dl_msg for k in (
+        "Max retries", "SSLError", "file1.assrt.net",          # 收敛前的原始异常文本
+        "无法连接到字幕服务器", "与字幕服务器建立安全连接时被中断",  # 收敛后的用户可见文案
+    ))
     if unreachable:
         RPT.check("单条字幕下载并加入任务队列", False,
                   "字幕文件服务器 file1.assrt.net 在本环境不可达（网络受限，非代码缺陷）")
