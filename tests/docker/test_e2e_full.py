@@ -43,6 +43,14 @@ import time
 
 import requests
 
+# 断言行里有 ✅/❌ 这类字符。Windows 上把输出重定向到文件时 stdout 默认用 GBK，
+# 写这些字符会直接 UnicodeEncodeError 把脚本打断，所以先固定成 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 # ======================== 环境参数 ========================
 APP_CONTAINER = os.environ.get("ZONGZI_APP_CONTAINER", "zongzibay-app")
 BASE = os.environ.get("ZONGZI_BASE_URL", "http://localhost:8000")
