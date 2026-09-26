@@ -315,6 +315,11 @@ class Config:
                 yaml.dump(self._file_config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
             runtime = copy.deepcopy(self._file_config)
             self._override_from_env(runtime)
+            # 与 _load_config 保持一致：环境变量注入的明文密码同样要 SHA-256 → bcrypt。
+            # 少了这一步，保存配置后内存里的 security.password 会退回环境变量的明文，
+            # 而前端传输的是 SHA-256 值，verify_password 落到明文比对分支必然失败——
+            # 表现为「用环境变量注入密码的 Docker 部署，初始化完成后登录不上」。
+            self._hash_env_password_if_needed(runtime)
             self._config = runtime
             logger.info(f"配置已保存: {self._config_path}")
         except Exception as e:

@@ -2,7 +2,9 @@
 
 RPC 端点：POST /transmission/rpc（JSON-RPC 风格）
 认证：首次请求会返回 409 + X-Transmission-Session-Id 头，需带该头重发。
-能力：与 qB 同级 —— 支持暂停拉元数据、文件选择、种子内重命名、移动位置、做种分享率。
+能力：支持文件选择、种子内重命名、移动位置、做种分享率。
+注意：Transmission 在暂停态下不会连接 peer，拿不到元数据（supports_paused_metadata=False），
+所以选文件与磁力解析都必须「运行态添加 → 等元数据就绪 → 再操作」。
 
 关键方法映射：
 - 添加: torrent-add（filename=磁力/URL，或 metainfo=base64 种子）
@@ -44,14 +46,18 @@ class TransmissionDownloader(BaseDownloader):
         supports_file_selection=True,
         supports_rename=True,
         supports_set_location=True,
-        supports_paused_metadata=True,
+        # Transmission 暂停时不连 peer，元数据永远拉不到，
+        # 因此只能「运行态添加 → 等元数据 → 再筛选文件」。
+        supports_paused_metadata=False,
+        supports_runtime_file_selection=True,
         supports_magnet=True,
         supports_torrent_file=True,
         supports_seeding_ratio=True,
     )
 
     def __init__(self, host: str = "", username: str = "", password: str = ""):
-        self.host = (host or "http://localhost:9091").rstrip("/")
+        # 去掉首尾空白：设置页粘贴地址时容易带上空格，会污染落库值
+        self.host = (host or "http://localhost:9091").strip().rstrip("/")
         self.username = username
         self.password = password
         self._session_id: Optional[str] = None
@@ -280,7 +286,7 @@ class TransmissionDownloader(BaseDownloader):
             return False
 
     # ------------------------------------------------------------------
-    # 磁力解析：Transmission 暂停添加时也会拉元数据
+    # 磁力解析：必须运行态添加，暂停态拉不到元数据
     # ------------------------------------------------------------------
 
     def parse_magnet(self, magnet_link: str, timeout: int = 60) -> List[TorrentFile]:
@@ -288,7 +294,9 @@ class TransmissionDownloader(BaseDownloader):
         if not torrent_hash:
             raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="无效的磁力链接")
         try:
-            self.add_torrent(urls=magnet_link, is_paused=True)
+            # 不能用 is_paused=True：Transmission 暂停时不连 peer，元数据永远拿不到。
+            # 解析期间会有少量数据写入，finally 中连同临时种子一起删除。
+            self.add_torrent(urls=magnet_link, is_paused=False)
         except Exception:
             raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="添加种子失败")
 

@@ -37,7 +37,7 @@ class QBittorrentDownloader(BaseDownloader):
     )
 
     def __init__(self, host: str = "", username: str = "", password: str = "", api_key: str = ""):
-        self.host = (host or "http://localhost:8080").rstrip("/")
+        self.host = (host or "http://localhost:8080").strip().rstrip("/")
         self.username = username
         self.password = password
         self.api_key = api_key

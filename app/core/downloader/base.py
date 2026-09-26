@@ -13,7 +13,9 @@
    - supports_file_selection：能否在下载时选择部分文件
    - supports_rename：能否在种子内重命名文件/目录（Aria2 不支持）
    - supports_set_location：能否移动已下载文件位置（Aria2 不支持）
-   - supports_paused_metadata：暂停添加时是否仍拉取元数据（Aria2 不支持）
+   - supports_paused_metadata：暂停添加时是否仍拉取元数据（Aria2 / Transmission 不支持）
+   - supports_runtime_file_selection：是否支持「运行态选文件」——添加时不暂停，
+     等元数据就绪后再设优先级。Transmission 暂停时不连 peer，只能走这条路径。
 """
 
 import hashlib
@@ -45,6 +47,9 @@ class DownloaderCapabilities:
     supports_rename: bool = True            # 支持种子内文件/目录重命名
     supports_set_location: bool = True      # 支持移动已下载文件位置
     supports_paused_metadata: bool = True   # 暂停添加时仍拉取元数据
+    # 运行态选文件：添加时不暂停，等元数据就绪后再设置文件优先级。
+    # 适用于「暂停时不连 peer、拿不到元数据」但仍支持文件选择的后端（Transmission）。
+    supports_runtime_file_selection: bool = False
     supports_magnet: bool = True            # 支持磁力链接
     supports_torrent_file: bool = True      # 支持 .torrent 文件上传
     supports_seeding_ratio: bool = True     # 支持做种分享率限制

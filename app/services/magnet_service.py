@@ -13,6 +13,7 @@ from app.core.downloader.base import BaseDownloader
 from app.schemas.base import BusinessException, ErrorCode
 from app.schemas.magnet import MagnetFile
 from app.schemas.notification import NotificationType
+from app.services.download_path import ensure_download_dir
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +109,15 @@ class MagnetService:
         try:
             existing_torrent = client.get_torrent_info(torrent_hash)
             if existing_torrent:
+                # 状态必须是 DownloadTaskStatus 里的合法值："already_exists" 不在枚举中，
+                # 会让 /tasks/list 构造响应模型时 ValidationError → 该接口整体 500。
+                # 下载器里已有该种子，与 task_service 的既有约定一致，按 downloading 录入，
+                # 由 task_monitor 按下载器真实状态纠正。
                 db.insert_download_task(
                     taskName=torrent_hash, taskInfo="", sourceUrl=magnet_link,
                     sourcePath=None,
                     targetPath=existing_torrent.get("save_path") if isinstance(existing_torrent, dict) else None,
-                    taskStatus="already_exists",
+                    taskStatus="downloading",
                 )
                 return {"hash": torrent_hash, "status": "already_exists"}
         except Exception as e:
@@ -130,12 +135,16 @@ class MagnetService:
         try:
             db.insert_download_task(
                 taskName=torrent_hash, taskInfo="", sourceUrl=magnet_link,
-                sourcePath=None, targetPath=target_path, taskStatus="下载中",
+                sourcePath=None, targetPath=target_path, taskStatus="downloading",
             )
         except Exception as e:
             raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"写入数据库失败: {e}")
 
         magnet_with_trackers = self._append_trackers(magnet_link)
+        # target_path 带了随机子目录，通常并不存在；下载器多半能自己建，但如果
+        # 上级目录是本程序以 root 建的，下载器就会 Permission denied（任务直接 error）。
+        # 这里先建好并放权，失败不影响下载，只是退回「交给下载器自己建」。
+        ensure_download_dir(target_path)
         try:
             # 解析时不关心目录结构，这里保持默认布局
             success = client.add_torrent(urls=magnet_with_trackers, is_paused=False, save_path=target_path)

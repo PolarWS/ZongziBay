@@ -59,7 +59,7 @@ class Aria2Downloader(BaseDownloader):
     )
 
     def __init__(self, host: str = "", secret: str = ""):
-        self.host = (host or "http://localhost:6800").rstrip("/")
+        self.host = (host or "http://localhost:6800").strip().rstrip("/")
         self.secret = secret
         self.session = requests.Session()
 
@@ -146,8 +146,30 @@ class Aria2Downloader(BaseDownloader):
                 raise
             return False
 
+    @staticmethod
+    def _is_metadata_only_task(task: Dict[str, Any]) -> bool:
+        """是否为 bt-metadata-only 建出来的「只拉元数据」临时任务。
+
+        这种任务与随后的真实下载任务共享同一个 infoHash。若不排除，按 hash
+        查找就会命中它，上层拿到的 name / content_path 会变成 [METADATA] 占位文件，
+        归档阶段找不到目标而无限重试。
+        """
+        # 真实 BT 任务带 mode（single/multi）；只拉元数据的任务没有
+        if (task.get("bittorrent") or {}).get("mode"):
+            return False
+        files = task.get("files") or []
+        if not files:
+            return False
+        return all(
+            str(f.get("path", "")).replace("\\", "/").split("/")[-1].startswith("[METADATA]")
+            for f in files
+        )
+
     def _find_gid_by_hash(self, torrent_hash: str) -> Optional[str]:
-        """通过扫描所有任务，按 infoHash 匹配定位 gid"""
+        """通过扫描所有任务，按 infoHash 匹配定位 gid
+
+        跳过 bt-metadata-only 的临时任务（见 _is_metadata_only_task）。
+        """
         for state in ("tellActive", "tellWaiting", "tellStopped"):
             try:
                 params = [0, 1000] if state in ("tellWaiting", "tellStopped") else []
@@ -155,8 +177,11 @@ class Aria2Downloader(BaseDownloader):
                 for t in results:
                     # Aria2 tellActive/tellWaiting/tellStopped 顶层即有 infoHash（bittorrent 子对象不含）
                     info_hash = t.get("infoHash") or ((t.get("bittorrent") or {}).get("infoHash"))
-                    if (info_hash or "").lower() == torrent_hash.lower():
-                        return t.get("gid")
+                    if (info_hash or "").lower() != torrent_hash.lower():
+                        continue
+                    if self._is_metadata_only_task(t):
+                        continue
+                    return t.get("gid")
             except Exception as e:
                 logger.warning(f"Aria2 扫描 {state} 失败: {e}")
         return None

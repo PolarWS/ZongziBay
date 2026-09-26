@@ -105,6 +105,8 @@ def _restore_masked_keys(body: Dict[str, Any]) -> Dict[str, Any]:
             old_key = (existing.get("qbittorrent") or {}).get("api_key") or ""
             if old_key and old_key != _MASKED_PLACEHOLDER:
                 qb["api_key"] = old_key
+        if isinstance(qb.get("host"), str):
+            qb["host"] = qb["host"].strip().rstrip("/")
     # downloader 节：恢复 Transmission 密码 / Aria2 rpc-secret
     dl = body.get("downloader")
     if isinstance(dl, dict):
@@ -118,6 +120,11 @@ def _restore_masked_keys(body: Dict[str, Any]) -> Dict[str, Any]:
             old_secret = ((existing.get("downloader") or {}).get("aria2") or {}).get("secret") or ""
             if old_secret and old_secret != _MASKED_PLACEHOLDER:
                 aria2["secret"] = old_secret
+        # 地址归一化：设置页粘贴地址容易带上首尾空格，落库前统一清理
+        for backend in ("transmission", "aria2"):
+            section = dl.get(backend)
+            if isinstance(section, dict) and isinstance(section.get("host"), str):
+                section["host"] = section["host"].strip().rstrip("/")
 
     # 登录密码脱敏恢复 — 前端看不到真实值，按 tb"****"原样提交，需用已有哈希恢复
     sec = body.get("security")

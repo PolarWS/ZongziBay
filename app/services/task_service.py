@@ -11,6 +11,7 @@ from app.core.downloader.manager import downloader_manager
 from app.schemas.base import BusinessException, ErrorCode
 from app.schemas.notification import NotificationType
 from app.schemas.task import AddTaskRequest
+from app.services.download_path import ensure_download_dir
 from app.services.magnet_service import normalize_info_hash
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,13 @@ class TaskService:
         if caps is None:
             return True
         return bool(getattr(caps, "supports_file_selection", True))
+
+    def _supports_runtime_file_selection(self) -> bool:
+        """后端是否支持「运行态选文件」：不暂停添加，等元数据就绪后再设优先级"""
+        caps = getattr(self.qb_client, "capabilities", None)
+        if caps is None:
+            return False
+        return bool(getattr(caps, "supports_runtime_file_selection", False))
 
     def add_task(self, request: AddTaskRequest) -> int:
         """添加下载任务。立即写入 DB 并返回,后台由 task_monitor 异步推送到 qBittorrent."""
@@ -193,33 +201,49 @@ class TaskService:
                          logger.warning(f"恢复现有任务 {task_id} 失败: {e}")
 
             if is_new_task:
-                # 能力感知：后端若"暂停时不拉元数据"（如 Aria2），无法在下载中选文件，
-                # 降级为全量下载（完成后由复制归档模式挑选/重命名需要的文件）。
+                # 能力感知：需要选文件时，按后端能力决定流程。
                 supports_paused_metadata = self._supports_paused_metadata()
-                if file_tasks and not torrent_hash and supports_paused_metadata:
+                can_select_files = bool(file_tasks) and self._supports_file_selection()
+
+                # 暂停态也能拉元数据（qBittorrent）：暂停添加 → 等元数据 → 筛选 → 恢复
+                pause_to_filter = can_select_files and supports_paused_metadata
+                # 只有运行态才拉得到元数据（Transmission）：正常添加 → 等元数据 → 筛选
+                filter_after_start = (
+                    can_select_files
+                    and not supports_paused_metadata
+                    and self._supports_runtime_file_selection()
+                )
+
+                if (pause_to_filter or filter_after_start) and not torrent_hash:
                     raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="无法从链接解析Hash，不支持文件选择")
+                # 其余情况（如 Aria2）无法在下载中选文件，降级为全量下载
+                # （完成后由复制归档模式挑选/重命名需要的文件）。
 
                 # 下载时追加 trackers 到磁力链接
                 download_url = self._append_trackers(source_url, self.trackers)
 
-                # 有文件选择时先暂停添加，等元数据后设置优先级再恢复
-                should_filter_files = bool(file_tasks) and supports_paused_metadata
-                is_paused = should_filter_files
+                # source_path 一般还不存在，靠下载器自己建；但若上级目录是本程序以
+                # root 预建的，下载器（容器内多为 abc=1000）会 Permission denied，
+                # 任务直接变 error。先建好并放权，失败不影响下载。
+                ensure_download_dir(source_path)
+
                 # 为避免只选部分文件时 qB 生成多余"种子名子目录"，统一使用 NoSubfolder
                 success = self.qb_client.add_torrent(
                     urls=download_url,
                     save_path=source_path,
-                    is_paused=is_paused,
+                    is_paused=pause_to_filter,
                     content_layout="NoSubfolder",
                 )
                 if not success:
-                    logger.error(f"[TaskService] qBittorrent 添加任务失败: task_id={task_id}, url={source_url}")
-                    raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="无法添加到 qBittorrent")
+                    logger.error(f"[TaskService] 下载器添加任务失败: task_id={task_id}, url={source_url}")
+                    raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="无法添加到下载器")
 
-                if should_filter_files:
+                if pause_to_filter or filter_after_start:
                     try:
                         self._filter_torrent_files(torrent_hash, file_tasks)  # 设置选中 1，未选 0
-                        self.qb_client.resume_torrents(torrent_hash)
+                        if pause_to_filter:
+                            # 运行态筛选的后端本就没暂停，无需恢复
+                            self.qb_client.resume_torrents(torrent_hash)
                     except Exception as e:
                         logger.error(f"[TaskService] 过滤文件失败: {e}")
                         raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"过滤文件失败: {e}")
