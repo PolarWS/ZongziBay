@@ -118,6 +118,47 @@ class TestAria2FindGid:
         dl._rpc.side_effect = [[{"gid": "g1", "bittorrent": {"infoHash": "ABCDEF" + "a" * 34}}], [], []]
         assert dl._find_gid_by_hash("abcdef" + "a" * 34) == "g1"
 
+    def test_skips_metadata_only_task(self):
+        """bt-metadata-only 的临时任务与真实下载任务同 hash，必须跳过前者。
+
+        命中元数据任务会拿到 [METADATA] 占位路径，归档阶段找不到目标而无限重试。
+        """
+        dl = self._make()
+        dl._rpc.side_effect = [
+            [],  # tellActive
+            [],  # tellWaiting
+            [    # tellStopped：元数据任务排在真实下载任务前面
+                {"gid": "meta", "infoHash": "m" * 40, "status": "complete",
+                 "files": [{"path": "/downloads/[METADATA]Movie", "length": "1945"}]},
+                {"gid": "real", "infoHash": "m" * 40, "status": "complete",
+                 "bittorrent": {"mode": "multi"},
+                 "files": [{"path": "/downloads/Movie/a.mkv", "length": "100"}]},
+            ],
+        ]
+        assert dl._find_gid_by_hash("m" * 40) == "real"
+
+    def test_metadata_only_task_alone_returns_none(self):
+        """只剩元数据任务时返回 None，让上层走「任务不存在」而不是拿到假路径"""
+        dl = self._make()
+        dl._rpc.side_effect = [
+            [],  # tellActive
+            [],  # tellWaiting
+            [{"gid": "meta", "infoHash": "m" * 40, "status": "complete",
+              "files": [{"path": "/downloads/[METADATA]Movie", "length": "1945"}]}],
+        ]
+        assert dl._find_gid_by_hash("m" * 40) is None
+
+    def test_real_single_file_task_kept(self):
+        """真实任务靠 bittorrent.mode 识别，文件名以 [METADATA] 开头也不误伤"""
+        dl = self._make()
+        dl._rpc.side_effect = [
+            [{"gid": "g1", "infoHash": "s" * 40,
+              "bittorrent": {"mode": "single"},
+              "files": [{"path": "/downloads/[METADATA]Trick.mkv", "length": "100"}]}],
+            [], [],
+        ]
+        assert dl._find_gid_by_hash("s" * 40) == "g1"
+
 
 class TestAria2GetInfo:
     """get_torrent_info：Aria2 tellStatus → 规范化 dict"""

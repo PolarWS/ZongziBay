@@ -297,6 +297,51 @@ class TestTaskServicePushToQb:
         call_kw = ts.qb_client.add_torrent.call_args[1]
         assert call_kw["is_paused"] is True
 
+    def test_transmission_filters_without_pausing(self):
+        """Transmission 暂停态拉不到元数据 → 非暂停添加，等元数据就绪后再筛选"""
+        from app.core.downloader.transmission import TransmissionDownloader
+        ts = TaskService()
+        ts.qb_client = MagicMock()
+        ts.qb_client.capabilities = TransmissionDownloader().capabilities
+        ts.qb_client.get_torrent_info.return_value = None
+        ts.qb_client.add_torrent.return_value = True
+        ts.trackers = []
+
+        file_tasks = [MagicMock(sourcePath="a.mkv", targetPath="", file_rename="New.mkv")]
+        with patch.object(TaskService, "_filter_torrent_files", return_value=None) as mock_filter:
+            success = ts.push_to_qb(
+                task_id=1,
+                source_url="magnet:?xt=urn:btih:" + "g" * 40,
+                source_path="/downloads",
+                torrent_hash="g" * 40,
+                file_tasks=file_tasks,
+            )
+        assert success is True
+        # 关键：必须非暂停添加，否则永远等不到元数据（原先的死锁点）
+        assert ts.qb_client.add_torrent.call_args[1]["is_paused"] is False
+        mock_filter.assert_called_once()
+        # 本就没暂停，不需要恢复
+        ts.qb_client.resume_torrents.assert_not_called()
+
+    def test_selecting_files_without_hash_raises(self):
+        """需要选文件但拿不到 Hash → 报错，而不是静默推送后无法筛选"""
+        from app.core.downloader.qbittorrent import QBittorrentDownloader
+        from app.schemas.base import BusinessException
+
+        ts = TaskService()
+        ts.qb_client = MagicMock()
+        ts.qb_client.capabilities = QBittorrentDownloader().capabilities
+        ts.trackers = []
+
+        with pytest.raises(BusinessException):
+            ts.push_to_qb(
+                task_id=1,
+                source_url="http://example.com/a.torrent",
+                source_path="/downloads",
+                torrent_hash=None,
+                file_tasks=[MagicMock(sourcePath="a.mkv")],
+            )
+
 
 # ---------------------------------------------------------------------------
 # TaskService：取消任务

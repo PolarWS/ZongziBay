@@ -153,3 +153,66 @@ class TestConfigOverrideFromEnv:
                 del os.environ[env_key]
             cfg._override_from_env(data, "ZONGZI", "")
         assert data["security"]["username"] == "admin"
+
+
+class TestHashEnvPasswordIfNeeded:
+    """_hash_env_password_if_needed：环境变量注入的明文密码 → bcrypt(SHA-256(raw))"""
+
+    def test_plaintext_gets_hashed(self):
+        cfg = config
+        data = {"security": {"password": "admin123"}}
+        cfg._hash_env_password_if_needed(data)
+        stored = data["security"]["password"]
+        assert stored != "admin123"
+        assert stored.startswith("$2b$")
+        # 前端传输的是 SHA-256 值，必须用它才能验证通过
+        import hashlib
+
+        from app.core.security import verify_password
+
+        assert verify_password(hashlib.sha256(b"admin123").hexdigest(), stored)
+
+    def test_already_hashed_left_alone(self):
+        cfg = config
+        existing = "$2b$12$abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOP"
+        data = {"security": {"password": existing}}
+        cfg._hash_env_password_if_needed(data)
+        assert data["security"]["password"] == existing
+
+    def test_missing_password_no_crash(self):
+        cfg = config
+        data = {"security": {"username": "admin"}}
+        cfg._hash_env_password_if_needed(data)
+        assert "password" not in data["security"]
+
+
+class TestSaveFileConfigKeepsEnvPasswordHashed:
+    """回归：save_file_config 之后，环境变量注入的密码必须仍是哈希。
+
+    曾经 save_file_config 只调用 _override_from_env 而漏了
+    _hash_env_password_if_needed，于是每次保存配置（包括初始化提交 setup_system、
+    设置页保存、登录时的密码升级）都会把内存里的 security.password 退回成
+    环境变量的明文。前端传的是 SHA-256 值，verify_password 落到明文比对分支
+    必然失败——表现为用环境变量注入密码的 Docker 部署初始化完成后登录不上。
+    """
+
+    def test_env_password_stays_hashed_after_save(self, tmp_path, monkeypatch):
+        import hashlib
+
+        from app.core.security import verify_password
+
+        cfg = config
+        monkeypatch.setenv("ZONGZI_SECURITY_PASSWORD", "admin123")
+        monkeypatch.setattr(cfg, "_config_path", str(tmp_path / "config.yml"))
+        monkeypatch.setattr(cfg, "_file_config", {})
+        monkeypatch.setattr(cfg, "_config", {})
+
+        # security.password 键必须存在：_override_from_env 只遍历配置里已有的键，
+        # 没有该键就不会去查 ZONGZI_SECURITY_PASSWORD。真实 config.yml 的
+        # 默认模板里这个键是有的（值为空串）。
+        cfg.save_file_config({"security": {"username": "admin", "password": ""}})
+
+        stored = cfg.get("security.password")
+        assert stored != "admin123", "环境变量密码在保存后退回了明文"
+        assert str(stored).startswith("$2b$")
+        assert verify_password(hashlib.sha256(b"admin123").hexdigest(), stored)

@@ -93,3 +93,19 @@ class TestRestoreMaskedKeys:
             mc.get_file_config.return_value = {}  # 无历史值
             restored = _restore_masked_keys(body)
         assert restored["downloader"]["aria2"]["secret"] == "****"
+
+    def test_strips_whitespace_and_trailing_slash_from_hosts(self):
+        """设置页粘贴地址常带首尾空格，落库前统一清理"""
+        body = {
+            "downloader": {
+                "transmission": {"host": "  http://t:9091/  "},
+                "aria2": {"host": " http://a:6800 "},
+            },
+            "qbittorrent": {"host": "  http://q:8080/ "},
+        }
+        with patch("app.api.v1.system.config") as mc:
+            mc.get_file_config.return_value = self._existing_config()
+            restored = _restore_masked_keys(body)
+        assert restored["downloader"]["transmission"]["host"] == "http://t:9091"
+        assert restored["downloader"]["aria2"]["host"] == "http://a:6800"
+        assert restored["qbittorrent"]["host"] == "http://q:8080"

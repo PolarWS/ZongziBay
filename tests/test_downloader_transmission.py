@@ -204,12 +204,51 @@ class TestTransmissionControls:
 
 
 class TestTransmissionCapabilities:
-    """能力标记：Transmission 与 qB 同级"""
+    """能力标记：支持选文件，但暂停态拿不到元数据"""
 
     def test_capabilities(self):
         dl = TransmissionDownloader()
         assert dl.capabilities.name == "transmission"
         assert dl.capabilities.supports_rename is True
         assert dl.capabilities.supports_set_location is True
-        assert dl.capabilities.supports_paused_metadata is True
+        # Transmission 暂停时不连 peer，元数据永远拉不到 → 只能运行态选文件
+        assert dl.capabilities.supports_paused_metadata is False
+        assert dl.capabilities.supports_runtime_file_selection is True
         assert dl.capabilities.supports_file_selection is True
+
+
+class TestTransmissionParseMagnet:
+    """parse_magnet：必须运行态添加，暂停态拉不到元数据"""
+
+    @staticmethod
+    def _downloader():
+        dl = TransmissionDownloader(host="http://t:9091")
+        dl.add_torrent = MagicMock(return_value=True)
+        dl.delete_torrents = MagicMock(return_value=True)
+        return dl
+
+    def test_parse_adds_unpaused(self):
+        dl = self._downloader()
+        dl.get_torrent_info = MagicMock(return_value={"total_size": 1024})
+        dl.get_torrent_files = MagicMock(return_value=[
+            {"name": "a.mkv", "path": "a.mkv", "size": 1024, "index": 0},
+        ])
+
+        files = dl.parse_magnet("magnet:?xt=urn:btih:" + "a" * 40, timeout=5)
+
+        # 关键：非暂停添加，否则元数据永远等不到
+        assert dl.add_torrent.call_args[1]["is_paused"] is False
+        assert len(files) == 1
+        # 临时种子连同解析期间的数据一起清理
+        dl.delete_torrents.assert_called_once_with("a" * 40, delete_files=True)
+
+    def test_parse_timeout_cleans_up(self):
+        from app.schemas.base import BusinessException
+
+        dl = self._downloader()
+        dl.get_torrent_info = MagicMock(return_value=None)
+
+        with pytest.raises(BusinessException):
+            dl.parse_magnet("magnet:?xt=urn:btih:" + "a" * 40, timeout=0.1)
+
+        dl.delete_torrents.assert_called_once()
