@@ -20,6 +20,21 @@ tmdb:
   api_domain: "https://api.themoviedb.org"     # TMDB API 地址，可配置为中转代理以加速访问
   image_domain: "https://image.tmdb.org"       # TMDB 图片地址，可配置为中转代理以加速图片加载
 
+# 下载器后端选择
+# active 可选: qbittorrent / transmission / aria2
+# 各后端的连接信息见下方对应配置节（qBittorrent 使用下方 qbittorrent 节）
+downloader:
+  active: "qbittorrent"                    # 当前使用的下载器后端
+  # --- Transmission 配置（active=transmission 时使用）---
+  transmission:
+    host: "http://localhost:9091"          # Transmission Web/RPC 地址
+    username: ""                           # RPC 用户名（可选）
+    password: ""                           # RPC 密码（可选）
+  # --- Aria2 配置（active=aria2 时使用）---
+  aria2:
+    host: "http://localhost:6800"          # Aria2 RPC 地址
+    secret: ""                             # rpc-secret（可选）
+
 # qBittorrent 下载器配置
 # 用于管理种子下载任务，需确保 qBittorrent 已开启 WebUI
 qbittorrent:

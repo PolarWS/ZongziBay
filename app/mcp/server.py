@@ -407,8 +407,6 @@ async def get_bangumi_calendar() -> str:
         if not data:
             return "暂无本周番剧数据。"
 
-        weekday_names = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
-
         lines = ["📺 本周新番放送日历："]
         for day_data in data:
             if isinstance(day_data, dict):
@@ -418,20 +416,25 @@ async def get_bangumi_calendar() -> str:
                 weekday = getattr(day_data, "weekday", getattr(day_data, "day", ""))
                 items = getattr(day_data, "items", [])
 
-            label = weekday_names.get(weekday, f"Day {weekday}")
+            # weekday 是 {id, cn, en, ja} 结构（BangumiWeekday），不能直接当字典键用，
+            # 否则 TypeError: unhashable type: 'dict'。
+            if isinstance(weekday, dict):
+                label = weekday.get("cn") or weekday.get("en") or "未知"
+            else:
+                label = getattr(weekday, "cn", None) or str(weekday) or "未知"
+
             lines.append(f"\n  {label}：")
             for item in items[:10]:
                 if isinstance(item, dict):
                     name = item.get("name_cn") or item.get("name", "N/A")
-                    rating = item.get("rating", {})
-                    score = ""
-                    if isinstance(rating, dict):
-                        score = rating.get("score", "")
-                    score_str = f" ⭐{score}" if score else ""
-                    lines.append(f"    - {name}{score_str} [ID: {item.get('id', 'N/A')}]")
+                    score = item.get("score", "")
+                    item_id = item.get("id", "N/A")
                 else:
                     name = getattr(item, "name_cn", None) or getattr(item, "name", "N/A")
-                    lines.append(f"    - {name}")
+                    score = getattr(item, "score", "")
+                    item_id = getattr(item, "id", "N/A")
+                score_str = f" ⭐{score}" if score else ""
+                lines.append(f"    - {name}{score_str} [ID: {item_id}]")
         return "\n".join(lines)
     except Exception as e:
         return f"获取番剧日历失败: {str(e)}"
@@ -453,17 +456,21 @@ async def search_subtitles(
     """
     require_scope("search")
     try:
-        results = await asyncio.to_thread(assrt_service.search_subtitles, keyword, page)
-        if not results:
+        # 服务层方法名是 search_subs（REST 端 assrt.py 也这么调），且返回 (items, total)
+        # 元组而非列表——此处原先调用不存在的 search_subtitles，该工具必然报错。
+        page = max(1, page)
+        items, total = await asyncio.to_thread(
+            assrt_service.search_subs, keyword, (page - 1) * 15, 15
+        )
+        if not items:
             return f"未找到与「{keyword}」相关的字幕。"
 
-        lines = [f"搜索「{keyword}」的字幕结果（第{page}页）："]
-        for i, r in enumerate(results[:15], 1):
-            item = r.__dict__ if hasattr(r, "__dict__") else r
-            name = item.get("name", item.get("title", item.get("filename", "N/A")))
-            lang = item.get("language", item.get("lang", ""))
+        lines = [f"搜索「{keyword}」的字幕结果（第{page}页，{total} 条）："]
+        for i, r in enumerate(items[:15], 1):
+            name = getattr(r, "native_name", None) or getattr(r, "videoname", None) or f"字幕 #{r.id}"
+            lang = getattr(getattr(r, "lang", None), "desc", "") or ""
             lang_str = f" [{lang}]" if lang else ""
-            lines.append(f"  {i}. {name}{lang_str}")
+            lines.append(f"  {i}. {name}{lang_str} [ID: {r.id}]")
         return "\n".join(lines)
     except Exception as e:
         return f"搜索字幕失败: {str(e)}"

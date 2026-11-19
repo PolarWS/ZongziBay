@@ -1,6 +1,8 @@
 /** 推荐页列表持久缓存（localStorage），刷新页面后仍可命中 */
 
-const STORAGE_KEY = 'zongzi_recommend_list_cache_v1'
+// v2: 修复空结果被写入缓存后长期命中（v1 曾把后端异常时的空列表缓存 7 天，
+// 导致页面一直显示「暂无数据」且不再发起请求）。改 key 可让旧污染缓存自动失效。
+const STORAGE_KEY = 'zongzi_recommend_list_cache_v2'
 const MAX_ENTRIES = 48
 /** 往季等稳定列表：7 天 */
 export const RECOMMEND_CACHE_TTL_PAST_MS = 7 * 24 * 60 * 60 * 1000

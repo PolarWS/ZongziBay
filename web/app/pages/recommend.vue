@@ -276,15 +276,14 @@ const listEntryHasData = (entry: ListCacheEntry) =>
   entry.items.length > 0 || entry.calendar.some((d) => (d.items?.length ?? 0) > 0)
 
 /**
- * 仅缓存成功结果。
+ * 仅缓存「有数据」的成功结果。
  * - 请求抛错不会走到这里
- * - 空结果不覆盖已有「有数据」的缓存，避免短暂失败/异常空包冲掉可用数据
+ * - 空结果一律不写入缓存：后端在 TMDB/上游异常时会返回空列表（HTTP 仍为 200），
+ *   若把这种空结果缓存下来，之后会长期命中缓存而不再发起请求，页面将一直
+ *   显示「暂无数据」。因此空结果直接跳过写入，保证下次访问会重新请求。
  */
 const commitListCache = (key: string, entry: ListCacheEntry) => {
-  if (!listEntryHasData(entry)) {
-    const prev = peekRecommendListCache(key)
-    if (prev && listEntryHasData(prev)) return
-  }
+  if (!listEntryHasData(entry)) return
   setRecommendListCache(key, entry)
 }
 

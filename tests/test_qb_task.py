@@ -246,6 +246,102 @@ class TestTaskServicePushToQb:
             )
         assert "无法添加" in str(exc.value)
 
+    def test_aria2_no_paused_metadata_skips_file_filter(self):
+        """Aria2 暂停不拉元数据 → 文件选择降级为全量下载（不暂停、不过滤）"""
+        from app.core.downloader.aria2 import Aria2Downloader
+        ts = TaskService()
+        ts.qb_client = MagicMock()
+        ts.qb_client.capabilities = Aria2Downloader().capabilities
+        ts.qb_client.get_torrent_info.return_value = None
+        ts.qb_client.add_torrent.return_value = True
+        ts.trackers = []
+
+        file_tasks = [MagicMock(sourcePath="a.mkv", targetPath="", file_rename="New.mkv")]
+        success = ts.push_to_qb(
+            task_id=1,
+            source_url="magnet:?xt=urn:btih:" + "g" * 40,
+            source_path="/downloads",
+            torrent_hash="g" * 40,
+            file_tasks=file_tasks,
+        )
+        assert success is True
+        # 不应暂停添加
+        call_kw = ts.qb_client.add_torrent.call_args[1]
+        assert call_kw["is_paused"] is False
+        # 不应调用文件过滤
+        ts.qb_client.set_file_priority.assert_not_called()
+        # 不应调用恢复（未暂停无需恢复）
+        ts.qb_client.resume_torrents.assert_not_called()
+
+    def test_qb_paused_metadata_still_filters(self):
+        """qB 暂停拉元数据 → 有文件选择时正常暂停+过滤"""
+        from app.core.downloader.qbittorrent import QBittorrentDownloader
+        ts = TaskService()
+        ts.qb_client = MagicMock()
+        ts.qb_client.capabilities = QBittorrentDownloader().capabilities
+        ts.qb_client.get_torrent_info.return_value = None
+        ts.qb_client.add_torrent.return_value = True
+        ts.trackers = []
+
+        file_tasks = [MagicMock(sourcePath="a.mkv", targetPath="", file_rename="New.mkv")]
+        # 屏蔽 _filter_torrent_files 内部逻辑（会真实调用）
+        with patch.object(TaskService, "_filter_torrent_files", return_value=None):
+            success = ts.push_to_qb(
+                task_id=1,
+                source_url="magnet:?xt=urn:btih:" + "g" * 40,
+                source_path="/downloads",
+                torrent_hash="g" * 40,
+                file_tasks=file_tasks,
+            )
+        assert success is True
+        call_kw = ts.qb_client.add_torrent.call_args[1]
+        assert call_kw["is_paused"] is True
+
+    def test_transmission_filters_without_pausing(self):
+        """Transmission 暂停态拉不到元数据 → 非暂停添加，等元数据就绪后再筛选"""
+        from app.core.downloader.transmission import TransmissionDownloader
+        ts = TaskService()
+        ts.qb_client = MagicMock()
+        ts.qb_client.capabilities = TransmissionDownloader().capabilities
+        ts.qb_client.get_torrent_info.return_value = None
+        ts.qb_client.add_torrent.return_value = True
+        ts.trackers = []
+
+        file_tasks = [MagicMock(sourcePath="a.mkv", targetPath="", file_rename="New.mkv")]
+        with patch.object(TaskService, "_filter_torrent_files", return_value=None) as mock_filter:
+            success = ts.push_to_qb(
+                task_id=1,
+                source_url="magnet:?xt=urn:btih:" + "g" * 40,
+                source_path="/downloads",
+                torrent_hash="g" * 40,
+                file_tasks=file_tasks,
+            )
+        assert success is True
+        # 关键：必须非暂停添加，否则永远等不到元数据（原先的死锁点）
+        assert ts.qb_client.add_torrent.call_args[1]["is_paused"] is False
+        mock_filter.assert_called_once()
+        # 本就没暂停，不需要恢复
+        ts.qb_client.resume_torrents.assert_not_called()
+
+    def test_selecting_files_without_hash_raises(self):
+        """需要选文件但拿不到 Hash → 报错，而不是静默推送后无法筛选"""
+        from app.core.downloader.qbittorrent import QBittorrentDownloader
+        from app.schemas.base import BusinessException
+
+        ts = TaskService()
+        ts.qb_client = MagicMock()
+        ts.qb_client.capabilities = QBittorrentDownloader().capabilities
+        ts.trackers = []
+
+        with pytest.raises(BusinessException):
+            ts.push_to_qb(
+                task_id=1,
+                source_url="http://example.com/a.torrent",
+                source_path="/downloads",
+                torrent_hash=None,
+                file_tasks=[MagicMock(sourcePath="a.mkv")],
+            )
+
 
 # ---------------------------------------------------------------------------
 # TaskService：取消任务
@@ -349,6 +445,17 @@ class TestTaskMonitorMapStatus:
             assert monitor._map_status("queuedUP") == "completed"
             assert monitor._map_status("pausedUP") == "completed"
 
+    def test_paused_states(self):
+        """Transmission/Aria2 的 paused/pausedDL 应映射为 paused 而非 downloading"""
+        monitor = TaskMonitor()
+        assert monitor._map_status("paused") == "paused"
+        assert monitor._map_status("pausedDL") == "paused"
+
+    def test_removed_state(self):
+        """Aria2 removed → cancelled"""
+        monitor = TaskMonitor()
+        assert monitor._map_status("removed") == "cancelled"
+
 
 # ---------------------------------------------------------------------------
 # TaskMonitor：模拟 qB 返回无任务 / 已完成 时的行为
@@ -423,3 +530,73 @@ class TestTaskMonitorQbSimulation:
         monitor._check_tasks()
 
         mock_db.update_task_status.assert_called_with(3, "downloading", 50.0)
+
+
+# ---------------------------------------------------------------------------
+# TaskService：_filter_torrent_files 跨后端文件匹配
+# ---------------------------------------------------------------------------
+
+class TestFilterTorrentFilesMatching:
+    """_filter_torrent_files：兼容 qB(name=完整路径) / Transmission(name=文件名) / Aria2(path=绝对路径)"""
+
+    def _make_ts(self):
+        ts = TaskService()
+        ts.qb_client = MagicMock()
+        ts.trackers = []
+        return ts
+
+    def _run_filter(self, ts, files, file_tasks):
+        """直接调用 _filter_torrent_files（元数据已就绪，total_size>0）"""
+        ts.qb_client.get_torrent_info.return_value = {"hash": "h" * 40, "total_size": 1000}
+        ts.qb_client.get_torrent_files.return_value = files
+        ts._filter_torrent_files("h" * 40, file_tasks)
+        # 返回两次 set_file_priority 调用（skip 0 / download 1）
+        return ts.qb_client.set_file_priority.call_args_list
+
+    def _file_task(self, source_path):
+        return {"sourcePath": source_path, "targetPath": "", "file_rename": "New"}
+
+    def test_qb_style_full_path_name(self):
+        """qB：name 是完整相对路径 Folder/a.mkv"""
+        ts = self._make_ts()
+        files = [
+            {"index": 0, "name": "Folder/a.mkv", "path": "Folder/a.mkv", "size": 100},
+            {"index": 1, "name": "Folder/a.srt", "path": "Folder/a.srt", "size": 50},
+        ]
+        calls = self._run_filter(ts, files, [self._file_task("Folder/a.mkv")])
+        # download 调用应为文件0
+        download_call = [c for c in calls if c.args[2] == 1]
+        assert download_call and download_call[0].args[1] == [0]
+
+    def test_transmission_style_name_only(self):
+        """Transmission：name 是纯文件名 a.mkv，path 是完整路径"""
+        ts = self._make_ts()
+        files = [
+            {"index": 0, "name": "a.mkv", "path": "Folder/a.mkv", "size": 100},
+            {"index": 1, "name": "a.srt", "path": "Folder/a.srt", "size": 50},
+        ]
+        calls = self._run_filter(ts, files, [self._file_task("Folder/a.mkv")])
+        download_call = [c for c in calls if c.args[2] == 1]
+        assert download_call and download_call[0].args[1] == [0]
+
+    def test_aria2_style_absolute_path(self):
+        """Aria2：path 是绝对路径 /downloads/x/a.mkv，name 是文件名"""
+        ts = self._make_ts()
+        files = [
+            {"index": 0, "name": "a.mkv", "path": "/downloads/test/a.mkv", "size": 100},
+            {"index": 1, "name": "a.srt", "path": "/downloads/test/a.srt", "size": 50},
+        ]
+        calls = self._run_filter(ts, files, [self._file_task("a.mkv")])
+        download_call = [c for c in calls if c.args[2] == 1]
+        assert download_call and download_call[0].args[1] == [0]
+
+    def test_unmatched_file_skipped(self):
+        """未匹配的文件应被 skip（priority 0）"""
+        ts = self._make_ts()
+        files = [
+            {"index": 0, "name": "keep.mkv", "path": "keep.mkv", "size": 100},
+            {"index": 1, "name": "skip.txt", "path": "skip.txt", "size": 10},
+        ]
+        calls = self._run_filter(ts, files, [self._file_task("keep.mkv")])
+        skip_call = [c for c in calls if c.args[2] == 0]
+        assert skip_call and skip_call[0].args[1] == [1]

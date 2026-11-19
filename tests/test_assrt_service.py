@@ -3,11 +3,16 @@ ASSRT 字幕服务单元测试（mock HTTP）
 覆盖：搜索、详情、相似字幕、配额、错误处理、URL 解析
 不依赖真实 ASSRT API 或数据库
 """
+import os
+import ssl
+
 import pytest
+import requests
 from unittest.mock import MagicMock, patch
 
 from app.services.assrt_service import (
     AssrtService,
+    _friendly_net_error,
     _raise_if_error,
     _resolve_download_path,
     _choose_subtitle_download_relative_by_target,
@@ -469,3 +474,195 @@ class TestAssrtErrorMessages:
         assert ASSRT_ERROR_MESSAGES[20001] == "Token不存在或无效"
         assert ASSRT_ERROR_MESSAGES[30000] == "服务器异常"
         assert ASSRT_ERROR_MESSAGES[30900] == "请求配额超限"
+
+
+# ---------------------------------------------------------------------------
+# 旧版 assrt 接口字段兼容（镜像站如 api.makedie.me 仍返回旧版字段）
+# ---------------------------------------------------------------------------
+
+class TestLegacyFormatCompat:
+    """旧版字段（fileid/m_subtype/m_langn）应被正确映射为新版字段。
+
+    回归背景：部分可用镜像返回的是旧版结构，缺少 id/native_name/upload_time，
+    旧实现直接按 s.get("id") 过滤，导致搜索结果恒为 0 条。
+    """
+
+    @staticmethod
+    def _legacy_item():
+        """一条真实旧版响应样例（字段截取自 api.makedie.me）。"""
+        return {
+            "videoname": "Show.S01E01.1080p.WEB-GRACE",
+            "video_chinese_name": "剧名/第一集",
+            "revision": "0",
+            "uploadtime": "2026-09-18 07:59:54",
+            "fileid": "801535",
+            "subtype": "2",
+            "m_subtype": "Subrip(srt)",
+            "m_title_bot": "剧名 第一集",
+            "m_lang": "英&nbsp;简&nbsp;繁&nbsp;双语",
+            "m_langn": ["langeng", "langchs", "langcht", "langdou"],
+            "m_extras": {"langeng": "1", "langchs": "1", "langcht": "1", "langdou": "1"},
+            "score": "7",
+            "score_cnt": "0",
+        }
+
+    @patch("app.services.assrt_service.config")
+    @patch("app.services.assrt_service.requests.get")
+    def test_legacy_item_is_parsed(self, mock_get, mock_config):
+        mock_config.get.side_effect = lambda key, default=None: {
+            "subtitle.assrt.token": "x" * 32,
+            "subtitle.assrt.base_url": "http://api.makedie.me",
+        }.get(key, default)
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"status": 0, "sub": {"subs": [self._legacy_item()]}}
+        mock_get.return_value = mock_resp
+
+        items, total = AssrtService().search_subs("Test S01E01")
+
+        assert total == 1
+        item = items[0]
+        # fileid -> id
+        assert item.id == 801535
+        # m_title_bot -> native_name
+        assert item.native_name == "剧名 第一集"
+        # uploadtime -> upload_time
+        assert item.upload_time == "2026-09-18 07:59:54"
+        # m_subtype 优先于数字代号 subtype
+        assert item.subtype == "Subrip(srt)"
+        # score -> vote_score
+        assert item.vote_score == 7
+        # m_langn + m_extras -> lang.langlist
+        assert item.lang is not None
+        assert item.lang.langlist.langchs is True
+        assert item.lang.langlist.langeng is True
+        assert item.lang.langlist.langcht is True
+        assert item.lang.langlist.langdou is True
+        # m_lang -> desc（含 &nbsp; 原样保留）
+        assert "英" in item.lang.desc
+
+    def test_legacy_item_without_valid_fileid_is_skipped(self):
+        from app.services.assrt_service import _has_sub_id
+
+        assert _has_sub_id({"fileid": "801535"}) is True
+        assert _has_sub_id({"id": 123}) is True
+        assert _has_sub_id({"fileid": ""}) is False
+        assert _has_sub_id({"fileid": "abc"}) is False
+        assert _has_sub_id({"fileid": None}) is False
+        assert _has_sub_id("not-a-dict") is False
+
+    def test_new_format_is_not_rewritten(self):
+        """新版响应必须原样通过，不能被兼容逻辑改动。"""
+        from app.services.assrt_service import _normalize_sub_raw
+
+        raw = {
+            "id": 999,
+            "native_name": "New.Format",
+            "upload_time": "2026-01-01",
+            "subtype": "ass",
+            "lang": {"langlist": {"langchs": True}, "desc": "简体"},
+        }
+        out = _normalize_sub_raw(dict(raw))
+        assert out["id"] == 999
+        assert out["native_name"] == "New.Format"
+        assert out["upload_time"] == "2026-01-01"
+        assert out["subtype"] == "ass"
+        assert out["lang"] == raw["lang"]
+
+
+# ---------------------------------------------------------------------------
+# _friendly_net_error
+# ---------------------------------------------------------------------------
+
+class TestFriendlyNetError:
+    """原始异常文本不能出现在用户可见的消息里，但结论要能区分原因"""
+
+    def test_ssl_error(self):
+        msg = _friendly_net_error(ssl.SSLEOFError(8, "[SSL: UNEXPECTED_EOF_WHILE_READING]"))
+        assert "安全连接" in msg
+        assert "SSLEOFError" not in msg and "file1.assrt.net" not in msg
+
+    def test_unwraps_nested_cause(self):
+        """requests 把真实原因挂在 __cause__ 上，必须剥到最内层"""
+        inner = ssl.SSLEOFError(8, "EOF occurred in violation of protocol")
+        wrapped = requests.ConnectionError("Max retries exceeded")
+        wrapped.__cause__ = inner
+        outer = requests.ConnectionError(
+            "HTTPSConnectionPool(host='file1.assrt.net', port=443)"
+        )
+        outer.__cause__ = wrapped
+        assert "安全连接" in _friendly_net_error(outer)
+
+    def test_timeout(self):
+        assert "超时" in _friendly_net_error(requests.ConnectTimeout("timed out"))
+        assert "超时" in _friendly_net_error(requests.ReadTimeout("timed out"))
+
+    def test_connection_error(self):
+        assert "无法连接" in _friendly_net_error(
+            requests.ConnectionError("Connection refused")
+        )
+
+    def test_unknown_falls_back_to_generic(self):
+        msg = _friendly_net_error(ValueError("something odd"))
+        assert "字幕服务器" in msg
+        assert "something odd" not in msg
+
+    def test_none_does_not_raise(self):
+        """last_err 理论上可能是 None，不能因此炸掉"""
+        assert isinstance(_friendly_net_error(None), str)
+
+
+# ---------------------------------------------------------------------------
+# _download_sub_to_path
+# ---------------------------------------------------------------------------
+
+class TestDownloadSubToPath:
+    """下载目录不存在时必须先创建。
+
+    缺陷：调用方显式传 download_path 时走 _resolve_download_path，不经过
+    _get_subtitle_download_dir_for_target，目录不会被创建，open(..., "wb")
+    直接 FileNotFoundError（用户看到「保存失败: [Errno 2] No such file or directory」）。
+    """
+
+    def _detail(self):
+        return AssrtSubDetail(
+            id=173817,
+            filename="2010_Sintel.UTF-8.tw.rar",
+            url="https://file1.assrt.net/onthefly/173817/-/1/x.rar",
+        )
+
+    @patch("app.services.assrt_service.requests.get")
+    def test_creates_missing_download_dir(self, mock_get, tmp_path):
+        target_dir = tmp_path / "not" / "yet" / "created"
+        assert not target_dir.exists()
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.iter_content.return_value = [b"subtitle-bytes"]
+        mock_get.return_value = mock_resp
+
+        saved, filename = AssrtService()._download_sub_to_path(
+            self._detail(), 173817, download_dir=str(target_dir)
+        )
+
+        assert target_dir.is_dir()
+        assert (target_dir / filename).read_bytes() == b"subtitle-bytes"
+        assert saved == os.path.abspath(os.path.join(str(target_dir), filename))
+
+    @patch("app.services.assrt_service.requests.get")
+    def test_existing_download_dir_untouched(self, mock_get, tmp_path):
+        """目录已存在时不应报错，也不该改动已有内容。"""
+        existing = tmp_path / "dl"
+        existing.mkdir()
+        (existing / "keep.txt").write_text("keep", encoding="utf-8")
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.iter_content.return_value = [b"x"]
+        mock_get.return_value = mock_resp
+
+        AssrtService()._download_sub_to_path(
+            self._detail(), 173817, download_dir=str(existing)
+        )
+
+        assert (existing / "keep.txt").read_text(encoding="utf-8") == "keep"

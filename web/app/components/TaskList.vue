@@ -257,7 +257,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                           'bg-purple-500': item.taskStatus === 'seeding',
                           'bg-green-500': item.taskStatus === 'completed',
                           'bg-red-500': ['cancelled', 'error', 'fetching_metadata_failed'].includes(item.taskStatus || ''),
-                          'bg-yellow-500': item.taskStatus === 'pending'
+                          'bg-yellow-500': ['pending', 'paused'].includes(item.taskStatus || '')
                         }"
                       ></span>
                     </span>
@@ -267,7 +267,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
               <td class="p-2 sm:p-4 align-middle [&:has([role=checkbox])]:pr-0 text-right">
                 <div class="flex items-center justify-end h-8">
                   <Button 
-                     v-if="['downloading', 'pending_download', 'pending', 'seeding', 'fetching_metadata', 'fetching_metadata_failed'].includes(item.taskStatus || '')"
+                     v-if="['downloading', 'pending_download', 'pending', 'paused', 'seeding', 'fetching_metadata', 'fetching_metadata_failed'].includes(item.taskStatus || '')"
                      variant="ghost" 
                      size="sm" 
                      class="h-8 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2"
@@ -331,7 +331,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                               'bg-purple-500': selected?.taskStatus === 'seeding',
                               'bg-green-500': selected?.taskStatus === 'completed',
                               'bg-red-500': ['cancelled', 'error', 'fetching_metadata_failed'].includes(selected?.taskStatus || ''),
-                              'bg-yellow-500': selected?.taskStatus === 'pending'
+                              'bg-yellow-500': ['pending', 'paused'].includes(selected?.taskStatus || '')
                             }"
                           ></span>
                         </span>
@@ -394,7 +394,7 @@ const onOpenFileTaskDetails = (ft: API.FileTask) => {
                         'bg-purple-500': selected?.taskStatus === 'seeding',
                         'bg-green-500': selected?.taskStatus === 'completed',
                         'bg-red-500': ['cancelled', 'error', 'fetching_metadata_failed'].includes(selected?.taskStatus || ''),
-                        'bg-yellow-500': selected?.taskStatus === 'pending'
+                        'bg-yellow-500': ['pending', 'paused'].includes(selected?.taskStatus || '')
                       }"
                     ></span>
                   </span>

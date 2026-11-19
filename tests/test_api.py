@@ -2,7 +2,30 @@
 API 冒烟测试
 覆盖：健康检查、登录、Refresh Token、Logout、Cookie 认证、任务列表、通知、系统配置
 """
+import os
+
+import pytest
+
 from app.core.security import create_access_token
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _backup_and_restore_config():
+    """备份并恢复项目 config.yml，避免测试写入污染共享配置（如 secret_key）"""
+    from app.core.config import config
+    path = config._config_path
+    backup = None
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            backup = f.read()
+    yield
+    if backup is not None:
+        with open(path, "wb") as f:
+            f.write(backup)
+    else:
+        if os.path.exists(path):
+            os.remove(path)
+    config.reload()
 
 
 # ---------------------------------------------------------------------------
@@ -254,3 +277,52 @@ def test_system_paths(client, token):
     data = resp.json()
     assert data["code"] == 200
     assert "data" in data
+
+
+# ---------------------------------------------------------------------------
+# 下载器配置（需认证）
+# ---------------------------------------------------------------------------
+
+def test_config_returns_downloader_masked(client, token):
+    """GET /system/config 返回 downloader 节，且敏感字段已脱敏"""
+    resp = client.get("/api/v1/system/config", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    dl = data.get("downloader", {}) or {}
+    # 敏感字段应为脱敏占位符
+    if dl.get("transmission", {}).get("password"):
+        assert dl["transmission"]["password"] == "****"
+    if dl.get("aria2", {}).get("secret"):
+        assert dl["aria2"]["secret"] == "****"
+
+
+def test_save_config_preserves_downloader(client, token):
+    """PUT /system/config 保存后 downloader 节保留，且不破坏 qB 配置。
+
+    注意：用 mock 隔离 config 文件写入，避免污染项目共享的 config.yml。
+    """
+    from unittest.mock import patch
+    from app.api.v1 import system as system_mod
+
+    # 构造含 downloader 节的完整配置
+    cfg = {
+        "security": {"secret_key": "a" * 32},
+        "downloader": {
+            "active": "transmission",
+            "transmission": {"host": "http://localhost:9091", "password": "tm-secret"},
+            "aria2": {"host": "http://localhost:6800", "secret": "aria-secret"},
+        },
+        "qbittorrent": {"host": "http://localhost:8080"},
+    }
+
+    # 保存成功后，save_file_config 应收到含 downloader 节的完整配置
+    saved_payload = {}
+    with patch.object(system_mod.config, "save_file_config", side_effect=lambda body: saved_payload.update(body)):
+        resp2 = client.put("/api/v1/system/config", json=cfg, headers={"Authorization": f"Bearer {token}"})
+    assert resp2.status_code == 200
+    assert resp2.json()["code"] == 200
+
+    # 验证写入的配置含完整 downloader 节
+    assert saved_payload["downloader"]["active"] == "transmission"
+    assert saved_payload["downloader"]["transmission"]["host"] == "http://localhost:9091"
+    assert saved_payload["downloader"]["aria2"]["secret"] == "aria-secret"

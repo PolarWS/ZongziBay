@@ -28,6 +28,7 @@ import {
 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { sha256 } from '@/utils/crypto'
+import { mergeEnvPlain, parseEnvConfig } from '@/utils/envConfigPrefill'
 import {
   Dialog,
   DialogContent,
@@ -73,6 +74,16 @@ const qbPassword = ref('')
 const qbApiKey = ref('')
 const showQbPassword = ref(false)
 const showQbApiKey = ref(false)
+// 下载器后端类型
+type DownloaderType = 'qbittorrent' | 'transmission' | 'aria2'
+const downloaderType = ref<DownloaderType>('qbittorrent')
+const tmHost = ref('')
+const tmUsername = ref('')
+const tmPassword = ref('')
+const showTmPassword = ref(false)
+const aria2Host = ref('')
+const aria2Secret = ref('')
+const showAria2Secret = ref(false)
 const tmdbApiKey = ref('')
 const tmdbApiDomain = ref('https://api.themoviedb.org')
 const assrtToken = ref('')
@@ -112,6 +123,10 @@ const existingFields = reactive({
   qbHost: false,
   qbPassword: false,
   qbApiKey: false,
+  tmHost: false,
+  tmPassword: false,
+  aria2Host: false,
+  aria2Secret: false,
   tmdbApiKey: false,
   assrtToken: false,
 })
@@ -236,17 +251,29 @@ async function checkStatus() {
 async function loadEnvConfig() {
   try {
     const res = await getEnvConfigApiV1SystemEnvConfigGet({ skipErrorHandler: true })
-    if (res.data?.parsed) {
-      const p = res.data.parsed
-      if (p.username && !username.value) username.value = p.username
-      if (p.password && !password.value) password.value = p.password
-      if (p.tmdb_api_key && !tmdbApiKey.value) tmdbApiKey.value = p.tmdb_api_key
-      if (p.assrt_token && !assrtToken.value) assrtToken.value = p.assrt_token
-      if (p.qb_host && !qbHost.value) qbHost.value = p.qb_host
-      if (p.qb_username && !qbUsername.value) qbUsername.value = p.qb_username
-      if (p.qb_password && !qbPassword.value) qbPassword.value = p.qb_password
-      if (p.qb_api_key && !qbApiKey.value) qbApiKey.value = p.qb_api_key
-    }
+    const { plain, configured } = parseEnvConfig(res.data?.parsed)
+
+    // 非敏感字段（用户名、地址）：后端返回真值，可直接预填。
+    // 注意是「覆盖」而非「为空才填」——本函数在 loadExistingConfig() 之后执行，
+    // 那个函数已经用 config.yml 的模板默认值（qbittorrent.host 默认
+    // http://localhost:8080）占好了位。带守卫的话环境变量永远填不进去，
+    // 容器里就会拿 localhost 去连——那指向 app 自己，不是下载器容器。
+    const merged = mergeEnvPlain(
+      { username: username.value, qbHost: qbHost.value, qbUsername: qbUsername.value },
+      plain,
+    )
+    username.value = merged.username
+    qbHost.value = merged.qbHost
+    qbUsername.value = merged.qbUsername
+
+    // 敏感字段（密码、API Key）：后端只返回「已注入」布尔标记，绝不返回明文。
+    // 这里只能标记为已配置，让用户留空保持不变；若当作明文填入会得到字面量
+    // "true"，提交后成为真实密码/密钥。
+    if (configured.password) existingFields.password = true
+    if (configured.qbPassword) existingFields.qbPassword = true
+    if (configured.qbApiKey) existingFields.qbApiKey = true
+    if (configured.tmdbApiKey) existingFields.tmdbApiKey = true
+    if (configured.assrtToken) existingFields.assrtToken = true
   } catch {
     // nothing
   }
@@ -272,6 +299,19 @@ async function loadExistingConfig() {
     if (d.qbittorrent?.username && !qbUsername.value) qbUsername.value = d.qbittorrent.username
     if (d.qbittorrent?.password) existingFields.qbPassword = true
     if (d.qbittorrent?.api_key) existingFields.qbApiKey = true
+
+    // 下载器后端类型
+    if (d.downloader?.active) downloaderType.value = d.downloader.active as DownloaderType
+    const dl = d.downloader || {}
+    const tmDl = dl.transmission || {}
+    if (tmDl.host) existingFields.tmHost = true
+    if (tmDl.host && !tmHost.value) tmHost.value = tmDl.host
+    if (tmDl.username && !tmUsername.value) tmUsername.value = tmDl.username
+    if (tmDl.password) existingFields.tmPassword = true
+    const ariaDl = dl.aria2 || {}
+    if (ariaDl.host) existingFields.aria2Host = true
+    if (ariaDl.host && !aria2Host.value) aria2Host.value = ariaDl.host
+    if (ariaDl.secret) existingFields.aria2Secret = true
 
     // ASSRT：Token 标记已配置，base_url 预填
     if (d.subtitle?.assrt?.token) existingFields.assrtToken = true
@@ -384,10 +424,44 @@ function goToStep(index: number) {
   currentStep.value = index
 }
 
+const DOWNLOADER_LABEL: Record<string, string> = {
+  qbittorrent: 'qBittorrent',
+  transmission: 'Transmission',
+  aria2: 'Aria2',
+}
+
+function buildDownloaderPayload() {
+  return {
+    active: downloaderType.value,
+    transmission: {
+      host: tmHost.value,
+      username: tmUsername.value,
+      password: tmPassword.value,
+    },
+    aria2: {
+      host: aria2Host.value,
+      secret: aria2Secret.value,
+    },
+  }
+}
+
 async function testQbConnection() {
-  if (!qbHost.value.trim() && !existingFields.qbHost) {
-    toast.error('请先填写 qBittorrent WebUI 地址')
-    return
+  const label = DOWNLOADER_LABEL[downloaderType.value] || '下载器'
+  if (downloaderType.value === 'qbittorrent') {
+    if (!qbHost.value.trim() && !existingFields.qbHost) {
+      toast.error('请先填写 qBittorrent WebUI 地址')
+      return
+    }
+  } else if (downloaderType.value === 'transmission') {
+    if (!tmHost.value.trim() && !existingFields.tmHost) {
+      toast.error('请先填写 Transmission RPC 地址')
+      return
+    }
+  } else {
+    if (!aria2Host.value.trim() && !existingFields.aria2Host) {
+      toast.error('请先填写 Aria2 RPC 地址')
+      return
+    }
   }
   testingQb.value = true
   qbTestPassed.value = false
@@ -395,6 +469,7 @@ async function testQbConnection() {
   try {
     const res = await testConnectionApiV1SystemTestConnectionPost(
       {
+        downloader: buildDownloaderPayload(),
         qb_host: qbHost.value,
         qb_username: qbUsername.value,
         qb_password: qbPassword.value,
@@ -406,16 +481,16 @@ async function testQbConnection() {
     if (result?.success) {
       qbTestPassed.value = true
       qbTestMessage.value = result.message
-      toast.success('qBittorrent 连接成功')
+      toast.success(`${label} 连接成功`)
     } else {
       qbTestPassed.value = false
       qbTestMessage.value = result?.message || '连接失败'
-      toast.error(result?.message || 'qBittorrent 连接失败')
+      toast.error(result?.message || `${label} 连接失败`)
     }
   } catch (e: any) {
     qbTestPassed.value = false
     qbTestMessage.value = e.message || '测试失败'
-    toast.error(e.message || 'qBittorrent 连接测试失败')
+    toast.error(e.message || `${label} 连接测试失败`)
   } finally {
     testingQb.value = false
   }
@@ -428,6 +503,7 @@ async function runTests() {
   try {
     const res = await testConnectionApiV1SystemTestConnectionPost(
       {
+        downloader: buildDownloaderPayload(),
         tmdb_api_key: tmdbApiKey.value,
         qb_host: qbHost.value,
         qb_username: qbUsername.value,
@@ -477,6 +553,7 @@ async function submitSetup() {
         username: username.value,
         password: password.value ? await sha256(password.value) : '',
         secret_key: secretKey.value,
+        downloader: buildDownloaderPayload(),
         qb_host: qbHost.value,
         qb_username: qbUsername.value,
         qb_password: qbPassword.value,
@@ -604,7 +681,7 @@ onMounted(async () => {
               </div>
               <div class="flex items-start gap-2.5">
                 <span class="text-primary font-bold mt-0.5 shrink-0">2.</span>
-                <span>配置 qBittorrent 下载器连接</span>
+                <span>配置下载器连接（qBittorrent / Transmission / Aria2）</span>
               </div>
               <div class="flex items-start gap-2.5">
                 <span class="text-primary font-bold mt-0.5 shrink-0">3.</span>
@@ -645,7 +722,7 @@ onMounted(async () => {
                 <EyeOff v-else class="w-4 h-4" />
               </button>
             </div>
-            <p class="text-xs text-muted-foreground/60 mt-1.5">如通过 Docker 环境变量注入，字段会自动填充</p>
+            <p class="text-xs text-muted-foreground/60 mt-1.5">如通过 Docker 环境变量注入，字段会标记为已配置，留空即保持不变</p>
           </div>
           <div class="space-y-1.5">
             <Label for="sk" class="text-sm font-medium text-foreground/75">JWT 密钥 <span class="text-red-500">*</span></Label>
@@ -689,51 +766,130 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- qBittorrent -->
+        <!-- 下载器后端 -->
         <div v-if="currentStep === 2" class="space-y-4">
-          <p class="text-xs text-red-500/80">* 下载器为必填项，请配置 qBittorrent 连接并通过连通性测试</p>
+          <p class="text-xs text-red-500/80">* 下载器为必填项，请选择后端类型、填写连接信息并通过连通性测试</p>
+
+          <!-- 后端类型选择 -->
           <div class="space-y-1.5">
-            <Label for="qb-host" class="text-sm font-medium text-foreground/75">WebUI 地址 <span class="text-red-500">*</span></Label>
-            <div class="input-wrapper">
-              <Server class="input-icon" />
-              <Input id="qb-host" v-model="qbHost" placeholder="http://localhost:8080" class="input-field" />
-            </div>
-          </div>
-          <div class="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5 space-y-1">
-            <p class="text-xs font-medium text-foreground/85">认证方式二选一（填一种即可，无需都填）</p>
-            <p class="text-xs text-muted-foreground/70">方式一：用户名 + 密码；方式二：API Key（需 qBittorrent 5.2.0+）</p>
-          </div>
-          <div class="space-y-1.5">
-            <Label class="text-sm font-medium text-foreground/75">方式一：用户名密码</Label>
-            <div class="grid grid-cols-2 gap-2">
-              <Input v-model="qbUsername" placeholder="用户名" class="input-field !pl-3" />
-              <div class="input-wrapper">
-                <Input v-model="qbPassword" :type="showQbPassword ? 'text' : 'password'" :placeholder="existingFields.qbPassword ? '已配置，留空则保持不变' : '密码'" class="input-field !pl-3 !pr-8" />
-                <button type="button" class="password-toggle" @click="showQbPassword = !showQbPassword">
-                  <Eye v-if="!showQbPassword" class="w-4 h-4" />
-                  <EyeOff v-else class="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-          <div class="flex items-center gap-3">
-            <div class="flex-1 h-px bg-border" />
-            <span class="text-xs text-muted-foreground shrink-0">或</span>
-            <div class="flex-1 h-px bg-border" />
-          </div>
-          <div class="space-y-1.5">
-            <Label for="qb-api" class="text-sm font-medium text-foreground/75">方式二：API Key <span class="text-xs text-muted-foreground/60">(qB 5.2.0+)</span></Label>
-            <div class="input-wrapper">
-              <KeyRound class="input-icon" />
-              <Input id="qb-api" v-model="qbApiKey" :type="showQbApiKey ? 'text' : 'password'" :placeholder="existingFields.qbApiKey ? '已配置，留空则保持不变' : 'qBittorrent API Key'" class="input-field" />
-              <button type="button" class="password-toggle" @click="showQbApiKey = !showQbApiKey">
-                <Eye v-if="!showQbApiKey" class="w-4 h-4" />
-                <EyeOff v-else class="w-4 h-4" />
+            <Label class="text-sm font-medium text-foreground/75">下载器类型 <span class="text-red-500">*</span></Label>
+            <div class="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                class="rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer"
+                :class="downloaderType === 'qbittorrent' ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'"
+                @click="downloaderType = 'qbittorrent'"
+              >
+                qBittorrent
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer"
+                :class="downloaderType === 'transmission' ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'"
+                @click="downloaderType = 'transmission'"
+              >
+                Transmission
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors cursor-pointer"
+                :class="downloaderType === 'aria2' ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'"
+                @click="downloaderType = 'aria2'"
+              >
+                Aria2
               </button>
             </div>
           </div>
 
-          <!-- qB 连通性测试 -->
+          <!-- qBittorrent 表单 -->
+          <template v-if="downloaderType === 'qbittorrent'">
+            <div class="space-y-1.5">
+              <Label for="qb-host" class="text-sm font-medium text-foreground/75">WebUI 地址 <span class="text-red-500">*</span></Label>
+              <div class="input-wrapper">
+                <Server class="input-icon" />
+                <Input id="qb-host" v-model="qbHost" placeholder="http://localhost:8080" class="input-field" />
+              </div>
+            </div>
+            <div class="rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5 space-y-1">
+              <p class="text-xs font-medium text-foreground/85">认证方式二选一（填一种即可，无需都填）</p>
+              <p class="text-xs text-muted-foreground/70">方式一：用户名 + 密码；方式二：API Key（需 qBittorrent 5.2.0+）</p>
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-sm font-medium text-foreground/75">方式一：用户名密码</Label>
+              <div class="grid grid-cols-2 gap-2">
+                <Input v-model="qbUsername" placeholder="用户名" class="input-field !pl-3" />
+                <div class="input-wrapper">
+                  <Input v-model="qbPassword" :type="showQbPassword ? 'text' : 'password'" :placeholder="existingFields.qbPassword ? '已配置，留空则保持不变' : '密码'" class="input-field !pl-3 !pr-8" />
+                  <button type="button" class="password-toggle" @click="showQbPassword = !showQbPassword">
+                    <Eye v-if="!showQbPassword" class="w-4 h-4" />
+                    <EyeOff v-else class="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="flex-1 h-px bg-border" />
+              <span class="text-xs text-muted-foreground shrink-0">或</span>
+              <div class="flex-1 h-px bg-border" />
+            </div>
+            <div class="space-y-1.5">
+              <Label for="qb-api" class="text-sm font-medium text-foreground/75">方式二：API Key <span class="text-xs text-muted-foreground/60">(qB 5.2.0+)</span></Label>
+              <div class="input-wrapper">
+                <KeyRound class="input-icon" />
+                <Input id="qb-api" v-model="qbApiKey" :type="showQbApiKey ? 'text' : 'password'" :placeholder="existingFields.qbApiKey ? '已配置，留空则保持不变' : 'qBittorrent API Key'" class="input-field" />
+                <button type="button" class="password-toggle" @click="showQbApiKey = !showQbApiKey">
+                  <Eye v-if="!showQbApiKey" class="w-4 h-4" />
+                  <EyeOff v-else class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <!-- Transmission 表单 -->
+          <template v-else-if="downloaderType === 'transmission'">
+            <div class="space-y-1.5">
+              <Label for="tm-host" class="text-sm font-medium text-foreground/75">RPC 地址 <span class="text-red-500">*</span></Label>
+              <div class="input-wrapper">
+                <Server class="input-icon" />
+                <Input id="tm-host" v-model="tmHost" placeholder="http://localhost:9091" class="input-field" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <Input v-model="tmUsername" placeholder="用户名（可选）" class="input-field !pl-3" />
+              <div class="input-wrapper">
+                <Input v-model="tmPassword" :type="showTmPassword ? 'text' : 'password'" :placeholder="existingFields.tmPassword ? '已配置，留空则保持不变' : '密码（可选）'" class="input-field !pl-3 !pr-8" />
+                <button type="button" class="password-toggle" @click="showTmPassword = !showTmPassword">
+                  <Eye v-if="!showTmPassword" class="w-4 h-4" />
+                  <EyeOff v-else class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <!-- Aria2 表单 -->
+          <template v-else-if="downloaderType === 'aria2'">
+            <div class="space-y-1.5">
+              <Label for="aria-host" class="text-sm font-medium text-foreground/75">RPC 地址 <span class="text-red-500">*</span></Label>
+              <div class="input-wrapper">
+                <Server class="input-icon" />
+                <Input id="aria-host" v-model="aria2Host" placeholder="http://localhost:6800" class="input-field" />
+              </div>
+            </div>
+            <div class="space-y-1.5">
+              <Label for="aria-secret" class="text-sm font-medium text-foreground/75">RPC Secret <span class="text-xs text-muted-foreground/60">(rpc-secret，可选)</span></Label>
+              <div class="input-wrapper">
+                <KeyRound class="input-icon" />
+                <Input id="aria-secret" v-model="aria2Secret" :type="showAria2Secret ? 'text' : 'password'" :placeholder="existingFields.aria2Secret ? '已配置，留空则保持不变' : 'rpc-secret'" class="input-field" />
+                <button type="button" class="password-toggle" @click="showAria2Secret = !showAria2Secret">
+                  <Eye v-if="!showAria2Secret" class="w-4 h-4" />
+                  <EyeOff v-else class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <p class="text-xs text-muted-foreground/60">注意：Aria2 不支持种子内重命名与移动归档，将降级为复制模式</p>
+          </template>
+
+          <!-- 连通性测试 -->
           <div class="pt-2 border-t border-border/50">
             <div class="flex items-center gap-2">
               <Button size="sm" variant="outline" :disabled="testingQb" :class="{ '!bg-red-600 !text-white !border-red-600 hover:!bg-red-700': !qbTestPassed && !testingQb }" @click="testQbConnection">

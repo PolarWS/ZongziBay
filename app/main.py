@@ -12,7 +12,7 @@ from starlette.responses import FileResponse, Response
 from app.api.v1.api import api_router
 from app.core import db
 from app.core.auth_middleware import JWTAuthMiddleware
-from app.core.handlers import register_exception_handlers
+from app.core.handlers import CatchAllExceptionMiddleware, register_exception_handlers
 from app.mcp.server import create_mcp_app
 from app.services.task_monitor import task_monitor
 
@@ -121,6 +121,11 @@ app = FastAPI(
 
 # 中间件顺序：后添加的先执行。先加 JWT，再加 CORS，这样 CORS 为最外层，能给所有响应加上 CORS 头。
 app.add_middleware(JWTAuthMiddleware)
+
+# 兜底中间件必须在未处理异常上抛到 ServerErrorMiddleware 之前接住它，
+# 否则 uvicorn 会在响应发出后静默关闭连接（详见 handlers.CatchAllExceptionMiddleware）。
+# 加在 CORS 之前，让它位于 CORS 内侧，出错响应同样能带上 CORS 头。
+app.add_middleware(CatchAllExceptionMiddleware)
 
 # 开发环境允许跨域请求的地址列表
 app.add_middleware(

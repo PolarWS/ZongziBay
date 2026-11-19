@@ -1,3 +1,4 @@
+import logging
 from typing import List, Literal
 
 from fastapi import APIRouter, Path, Query
@@ -6,6 +7,8 @@ from fastapi.concurrency import run_in_threadpool
 from app.schemas.bangumi import BangumiCalendarDay, BangumiSubjectDetail
 from app.schemas.base import BaseResponse, ErrorCode
 from app.services.bangumi_service import bangumi_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -24,6 +27,9 @@ async def bangumi_calendar():
         data = await run_in_threadpool(bangumi_service.get_calendar)
         return BaseResponse.success(data=data)
     except Exception:
+        # 上游 api.bgm.tv 抖动（连接超时、限流）都会走到这里。必须留下日志，
+        # 否则前端只看到一句「获取番剧周历失败」，任何原因都无从反查。
+        logger.exception("获取番剧周历失败")
         return BaseResponse.fail(code=ErrorCode.SYSTEM_ERROR, message="获取番剧周历失败")
 
 
@@ -44,6 +50,7 @@ async def bangumi_season(
     except ValueError as e:
         return BaseResponse.fail(code=ErrorCode.PARAMS_ERROR, message=str(e))
     except Exception:
+        logger.exception(f"获取季度新番失败 year={year} season={season}")
         return BaseResponse.fail(code=ErrorCode.SYSTEM_ERROR, message="获取季度新番失败")
 
 
@@ -59,4 +66,5 @@ async def bangumi_subject(subject_id: int = Path(..., description="Bangumi 条�
         data = await run_in_threadpool(bangumi_service.get_subject, subject_id)
         return BaseResponse.success(data=data)
     except Exception:
+        logger.exception(f"获取番剧详情失败 subject_id={subject_id}")
         return BaseResponse.fail(code=ErrorCode.SYSTEM_ERROR, message="获取番剧详情失败")

@@ -44,9 +44,9 @@ class AnimeGardenPagination(BaseModel):
 
 
 class AnimeGardenResponse(BaseModel):
-    """Anime Garden API 原始响应"""
+    """Anime Garden API 原始响应（上游已不再返回顶层 complete 字段，故设为可选）"""
     status: str
-    complete: bool
+    complete: Optional[bool] = None
     resources: List[AnimeGardenResource]
     pagination: Optional[AnimeGardenPagination] = None
     filter: Optional[dict] = None
@@ -58,7 +58,7 @@ class AnimeGardenResponse(BaseModel):
 class AnimeGardenSearchResult(BaseModel):
     """动漫花园搜索接口返回的 data 结构"""
     status: str
-    complete: bool
+    complete: Optional[bool] = None
     resources: List[AnimeGardenResource]
     pagination: Optional[AnimeGardenPagination] = None
     filter: Optional[dict] = None

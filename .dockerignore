@@ -9,3 +9,6 @@ __pycache__
 venv
 .env
 ZongziBay.db
+# 打包脚本生成的离线镜像归档，动辄几百 MB，绝不能进构建上下文
+*.tar
+.pytest_cache

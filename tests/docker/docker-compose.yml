@@ -1,0 +1,131 @@
+# ZongziBay 下载器集成测试环境
+# 包含：ZongziBay App + qBittorrent + Transmission + Aria2
+#
+# 启动: docker compose -f tests/docker/docker-compose.yml up -d --build
+# 停止: docker compose -f tests/docker/docker-compose.yml down -v
+
+services:
+  # ======================== ZongziBay 应用 ========================
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: zongzibay-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - app_config:/app/config
+      - downloads:/downloads
+    environment:
+      - TZ=Asia/Shanghai
+      - ZONGZI_SECURITY_USERNAME=admin
+      - ZONGZI_SECURITY_PASSWORD=admin123
+      - ZONGZI_SECURITY_SECRET_KEY=test_secret_key_123456
+      # 默认使用 qBittorrent 作为下载器，测试时会通过 API 切换
+      - ZONGZI_QBITTORRENT_HOST=http://qbittorrent:8080
+      - ZONGZI_QBITTORRENT_USERNAME=admin
+      - ZONGZI_QBITTORRENT_PASSWORD=nzN3M8FW7
+    depends_on:
+      qbittorrent:
+        condition: service_healthy
+      transmission:
+        condition: service_healthy
+      aria2:
+        condition: service_healthy
+    networks:
+      - zongzi-net
+    restart: unless-stopped
+
+  # ======================== qBittorrent ========================
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    container_name: zongzibay-qbittorrent
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    volumes:
+      - qb_config:/config
+      - downloads:/downloads
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+      - WEBUI_PORT=8080
+    networks:
+      - zongzi-net
+    healthcheck:
+      # qB WebUI 首页不需要认证，直接检查 TCP 可达性
+      test: ["CMD-SHELL", "curl -s -o /dev/null http://localhost:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  # ======================== Transmission ========================
+  transmission:
+    image: linuxserver/transmission:latest
+    container_name: zongzibay-transmission
+    ports:
+      - "9091:9091"
+      - "51413:51413"
+      - "51413:51413/udp"
+    volumes:
+      - tr_config:/config
+      - downloads:/downloads
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+      - TRANSMISSION_WEB_HOME=/combustion-release/
+      - USER=admin
+      - PASS=adminadmin
+    networks:
+      - zongzi-net
+    healthcheck:
+      # Transmission RPC 无 Session-Id 返回 409（视为正常响应）
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:9091/transmission/rpc | grep -qE '^(401|409)$' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  # ======================== Aria2 ========================
+  aria2:
+    image: p3terx/aria2-pro:latest
+    container_name: zongzibay-aria2
+    ports:
+      - "6800:6800"
+      - "6888:6888"
+      - "6888:6888/udp"
+    volumes:
+      - aria2_config:/config
+      - downloads:/downloads
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Shanghai
+      - RPC_SECRET=zongzibay_test
+    networks:
+      - zongzi-net
+    healthcheck:
+      # 用 netstat 检查 TCP 6800 端口是否监听
+      test: ["CMD-SHELL", "netstat -tln | grep -q ':6800 ' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+networks:
+  zongzi-net:
+    driver: bridge
+
+volumes:
+  app_config:
+  qb_config:
+  tr_config:
+  aria2_config:
+  downloads:

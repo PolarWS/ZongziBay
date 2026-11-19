@@ -4,13 +4,51 @@ from typing import Any, List, Optional
 
 import requests
 from tmdbv3api import TMDb, Movie, TV, Search, Trending, Discover
+from tmdbv3api.exceptions import TMDbException
 
 from app.core.config import config
+from app.schemas.base import BusinessException, ErrorCode
 
 logger = logging.getLogger(__name__)
 
+
+def _tmdb_error(exc: Exception, subject: str) -> BusinessException:
+    """把 tmdbv3api 抛出的异常翻译成业务异常。
+
+    否则 TMDbException 会一路逃到全局兜底处理器：接口只回 "服务器内部错误"，
+    且该错误路径会静默关闭 keep-alive 连接（见 app/core/handlers.py 的说明）。
+    """
+    msg = str(exc)
+    low = msg.lower()
+    if "could not be found" in low or "not found" in low:
+        return BusinessException(code=ErrorCode.NOT_FOUND_ERROR, message=f"TMDB 中未找到该{subject}")
+    if "no api key" in low:
+        return BusinessException(code=ErrorCode.SYSTEM_ERROR, message="TMDB API Key 未配置")
+    return BusinessException(code=ErrorCode.SYSTEM_ERROR, message=f"TMDB 请求失败: {msg}")
+
 # 英文区国家优先级（用于从 alternative_titles 中选取英文标题）
 _ENGLISH_COUNTRIES = ("US", "GB", "AU", "CA")
+
+# tmdbv3api 的 TMDb.__init__ 会把 _base 硬编码为官方地址，且部分方法会在内部
+# 新建实例（例如 Movie.search() 内部 new 一个 Search()），导致仅修改实例属性
+# 无法让 api_domain 配置生效。这里统一 patch TMDb.__init__，使所有新建对象
+# 都采用当前配置的域名。
+_TMDB_API_DOMAIN = "api.themoviedb.org"
+_ORIG_TMDB_INIT = TMDb.__init__
+
+
+def _tmdb_base_url() -> str:
+    """当前配置对应的 TMDB API base（含 /3）。"""
+    return f"https://{_TMDB_API_DOMAIN}/3"
+
+
+def _patched_tmdb_init(self, *args, **kwargs):
+    _ORIG_TMDB_INIT(self, *args, **kwargs)
+    self._base = _tmdb_base_url()
+
+
+TMDb.__init__ = _patched_tmdb_init
+
 
 
 def _attr_or_key(obj: Any, key: str) -> Optional[str]:
@@ -31,12 +69,22 @@ class TMDBService:
 
     def __init__(self):
         self.tmdb = TMDb()
-        self.reload_config()
         self.movie = Movie()
         self.tv = TV()
         self.search = Search()
         self.trending = Trending()
         self.discover = Discover()
+        # 子对象创建完毕后再应用配置，确保 _base 被正确覆盖
+        self.reload_config()
+
+    def _objs(self):
+        """返回所有会实际发起请求的 tmdbv3api 子对象（用于同步 _base）。"""
+        return tuple(
+            obj for obj in (
+                getattr(self, name, None)
+                for name in ("movie", "tv", "search", "trending", "discover", "tmdb")
+            ) if obj is not None
+        )
 
     def reload_config(self) -> None:
         """从当前运行时配置刷新 TMDB 客户端参数（设置页保存后可立即生效）。"""
@@ -49,7 +97,15 @@ class TMDBService:
         elif api_domain.startswith("http://"):
             api_domain = api_domain[7:]
         api_domain = api_domain.rstrip("/")
-        self.tmdb._base = f"https://{api_domain}/3"
+        base = f"https://{api_domain}/3"
+        # 记录到模块级，使 tmdbv3api 后续内部新建的实例（如 Movie.search() 里的
+        # Search()）也能拿到正确域名
+        global _TMDB_API_DOMAIN
+        _TMDB_API_DOMAIN = api_domain
+        self.tmdb._base = base
+        # 已存在的子对象也要立即同步
+        for obj in self._objs():
+            obj._base = base
 
     @staticmethod
     def _extract_results(raw) -> List[Any]:
@@ -152,14 +208,20 @@ class TMDBService:
 
     def get_movie_details(self, movie_id: int) -> Any:
         """获取电影详情（含主要演员阵容）"""
-        detail = self.movie.details(movie_id)
+        try:
+            detail = self.movie.details(movie_id)
+        except TMDbException as e:
+            raise _tmdb_error(e, "电影") from e
         data = self._detail_to_dict(detail)
         data["cast"] = self._get_cast(self.movie, movie_id)
         return data
 
     def get_tv_details(self, tv_id: int) -> Any:
         """获取电视剧详情（含主要演员阵容）"""
-        detail = self.tv.details(tv_id)
+        try:
+            detail = self.tv.details(tv_id)
+        except TMDbException as e:
+            raise _tmdb_error(e, "剧集") from e
         data = self._detail_to_dict(detail)
         data["cast"] = self._get_cast(self.tv, tv_id)
         return data

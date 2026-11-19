@@ -12,6 +12,7 @@ class DownloadTaskStatus(str, Enum):
     PENDING_DOWNLOAD = "pending_download"  # 字幕占位任务，后台尚未下载完成
     MOVING = "moving"
     SEEDING = "seeding"
+    PAUSED = "paused"  # 下载器侧暂停（Transmission / Aria2）
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     ERROR = "error"

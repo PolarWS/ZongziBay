@@ -7,10 +7,11 @@ from typing import List
 
 from app.core.config import config
 from app.core.db import db
-from app.core.qb_client import QBittorrentClient
+from app.core.downloader.manager import downloader_manager
 from app.schemas.base import BusinessException, ErrorCode
 from app.schemas.notification import NotificationType
 from app.schemas.task import AddTaskRequest
+from app.services.download_path import ensure_download_dir
 from app.services.magnet_service import normalize_info_hash
 
 logger = logging.getLogger(__name__)
@@ -23,17 +24,11 @@ class TaskService:
         self.reload_config()
 
     def reload_config(self) -> None:
-        """从当前运行时配置刷新 qBittorrent 连接信息与 trackers（设置页保存后可立即生效）。"""
-        qb_config = config.get("qbittorrent", {}) or {}
-        self.host = qb_config.get("host", "http://localhost:8080")
-        self.username = qb_config.get("username", "admin")
-        self.password = qb_config.get("password", "adminadmin")
-        self.api_key = qb_config.get("api_key", "") or ""
+        """从当前运行时配置刷新下载器后端与 trackers（设置页保存后可立即生效）。"""
         self.trackers = config.get("trackers", []) or []
-        # 连接参数变更后重建 client/session
-        self.qb_client = QBittorrentClient(
-            host=self.host, username=self.username,
-            password=self.password, api_key=self.api_key)
+        # 连接参数变更后重建后端实例
+        downloader_manager.reload()
+        self.qb_client = downloader_manager.get_backend()
 
     @staticmethod
     def _append_trackers(magnet_link: str, trackers: List[str]) -> str:
@@ -45,6 +40,27 @@ class TaskService:
             if tr:
                 result += f"&tr={urllib.parse.quote(tr, safe='')}"
         return result
+
+    def _supports_paused_metadata(self) -> bool:
+        """后端是否支持「暂停添加时拉取元数据」（Aria2 不支持 → 降级全量下载）"""
+        caps = getattr(self.qb_client, "capabilities", None)
+        if caps is None:
+            return True
+        return bool(getattr(caps, "supports_paused_metadata", True))
+
+    def _supports_file_selection(self) -> bool:
+        """后端是否支持在下载时选择部分文件"""
+        caps = getattr(self.qb_client, "capabilities", None)
+        if caps is None:
+            return True
+        return bool(getattr(caps, "supports_file_selection", True))
+
+    def _supports_runtime_file_selection(self) -> bool:
+        """后端是否支持「运行态选文件」：不暂停添加，等元数据就绪后再设优先级"""
+        caps = getattr(self.qb_client, "capabilities", None)
+        if caps is None:
+            return False
+        return bool(getattr(caps, "supports_runtime_file_selection", False))
 
     def add_task(self, request: AddTaskRequest) -> int:
         """添加下载任务。立即写入 DB 并返回,后台由 task_monitor 异步推送到 qBittorrent."""
@@ -145,8 +161,8 @@ class TaskService:
                 raise e
             raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"添加任务失败: {str(e)}")
 
-    def push_to_qb(self, task_id: int, source_url: str, source_path: str, torrent_hash: str = None, file_tasks: list = None) -> bool:
-        """推送任务到 qBittorrent，不处理 DB 事务"""
+    def push_to_downloader(self, task_id: int, source_url: str, source_path: str, torrent_hash: str = None, file_tasks: list = None) -> bool:
+        """推送任务到下载器，不处理 DB 事务"""
         try:
             # 如果之前已经检测到任务存在，则跳过 add_torrent
             is_new_task = True
@@ -171,7 +187,8 @@ class TaskService:
                              logger.warning(f"更新现有任务 {task_id} 路径失败: {e}")
 
                      # 如果需要过滤文件，即使是旧任务也尝试重新设置优先级
-                     if file_tasks:
+                     # 任务已存在且元数据已就绪，不依赖"暂停拉元数据"，只需后端支持文件选择
+                     if file_tasks and self._supports_file_selection():
                          try:
                              self._filter_torrent_files(torrent_hash, file_tasks)
                          except Exception as e:
@@ -184,30 +201,49 @@ class TaskService:
                          logger.warning(f"恢复现有任务 {task_id} 失败: {e}")
 
             if is_new_task:
-                if file_tasks and not torrent_hash:
+                # 能力感知：需要选文件时，按后端能力决定流程。
+                supports_paused_metadata = self._supports_paused_metadata()
+                can_select_files = bool(file_tasks) and self._supports_file_selection()
+
+                # 暂停态也能拉元数据（qBittorrent）：暂停添加 → 等元数据 → 筛选 → 恢复
+                pause_to_filter = can_select_files and supports_paused_metadata
+                # 只有运行态才拉得到元数据（Transmission）：正常添加 → 等元数据 → 筛选
+                filter_after_start = (
+                    can_select_files
+                    and not supports_paused_metadata
+                    and self._supports_runtime_file_selection()
+                )
+
+                if (pause_to_filter or filter_after_start) and not torrent_hash:
                     raise BusinessException(code=ErrorCode.PARAMS_ERROR, message="无法从链接解析Hash，不支持文件选择")
+                # 其余情况（如 Aria2）无法在下载中选文件，降级为全量下载
+                # （完成后由复制归档模式挑选/重命名需要的文件）。
 
                 # 下载时追加 trackers 到磁力链接
                 download_url = self._append_trackers(source_url, self.trackers)
 
-                # 有文件选择时先暂停添加，等元数据后设置优先级再恢复
-                should_filter_files = bool(file_tasks)
-                is_paused = should_filter_files
+                # source_path 一般还不存在，靠下载器自己建；但若上级目录是本程序以
+                # root 预建的，下载器（容器内多为 abc=1000）会 Permission denied，
+                # 任务直接变 error。先建好并放权，失败不影响下载。
+                ensure_download_dir(source_path)
+
                 # 为避免只选部分文件时 qB 生成多余"种子名子目录"，统一使用 NoSubfolder
                 success = self.qb_client.add_torrent(
                     urls=download_url,
                     save_path=source_path,
-                    is_paused=is_paused,
+                    is_paused=pause_to_filter,
                     content_layout="NoSubfolder",
                 )
                 if not success:
-                    logger.error(f"[TaskService] qBittorrent 添加任务失败: task_id={task_id}, url={source_url}")
-                    raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="无法添加到 qBittorrent")
+                    logger.error(f"[TaskService] 下载器添加任务失败: task_id={task_id}, url={source_url}")
+                    raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="无法添加到下载器")
 
-                if should_filter_files:
+                if pause_to_filter or filter_after_start:
                     try:
                         self._filter_torrent_files(torrent_hash, file_tasks)  # 设置选中 1，未选 0
-                        self.qb_client.resume_torrents(torrent_hash)
+                        if pause_to_filter:
+                            # 运行态筛选的后端本就没暂停，无需恢复
+                            self.qb_client.resume_torrents(torrent_hash)
                     except Exception as e:
                         logger.error(f"[TaskService] 过滤文件失败: {e}")
                         raise BusinessException(code=ErrorCode.OPERATION_ERROR, message=f"过滤文件失败: {e}")
@@ -216,10 +252,14 @@ class TaskService:
             
             return True
         except Exception as e:
-            logger.error(f"[TaskService] 推送任务 {task_id} 到 qB 异常: {e}")
+            logger.error(f"[TaskService] 推送任务 {task_id} 到下载器异常: {e}")
             if isinstance(e, BusinessException):
                 raise e
             return False
+
+    def push_to_qb(self, task_id: int, source_url: str, source_path: str, torrent_hash: str = None, file_tasks: list = None) -> bool:
+        """旧方法名兼容别名（已重命名为 push_to_downloader）"""
+        return self.push_to_downloader(task_id, source_url, source_path, torrent_hash, file_tasks)
 
     def cancel_task(self, task_id: int) -> bool:
         """取消任务：下载中/等待中可取消并删文件；做种中可取消并从 qB 移除（不删文件，适合复制完成的任务）"""
@@ -227,7 +267,7 @@ class TaskService:
         if not task:
             raise BusinessException(code=ErrorCode.NOT_FOUND_ERROR, message="任务不存在")
         status = task.get('taskStatus') or ''
-        if status not in ('downloading', 'pending', 'seeding', 'fetching_metadata', 'fetching_metadata_failed'):
+        if status not in ('downloading', 'pending', 'seeding', 'paused', 'fetching_metadata', 'fetching_metadata_failed'):
             raise BusinessException(code=ErrorCode.OPERATION_ERROR, message="只有活跃状态的任务可以取消")
 
         source_url = task['sourceUrl']
@@ -345,27 +385,45 @@ class TaskService:
         ids_to_download = []
         ids_to_skip = []
         
-        logger.info(f"开始过滤文件: qB文件数={len(files)}, 目标文件数={len(target_files)}")
+        logger.info(f"开始过滤文件: 下载器文件数={len(files)}, 目标文件数={len(target_files)}")
         for idx, f in enumerate(files):  # 按路径匹配分配优先级
-            f_path = self._normalize_torrent_path(f.get('name', ''))
-            
-            # 1. 精确匹配
+            # 兼容各后端返回结构：
+            # - qB: name 为完整相对路径（如 Folder/a.mkv）
+            # - Transmission: name 为纯文件名，path 为完整路径
+            # - Aria2: path 为绝对路径，name 为文件名
+            f_path = self._normalize_torrent_path(f.get('path', '') or f.get('name', ''))
+            f_name = self._normalize_torrent_path(f.get('name', ''))
+            if not f_path and f_name:
+                f_path = f_name
+
+            # 1. 精确匹配（完整路径）
             if f_path in target_files:
                 ids_to_download.append(idx)
                 continue
-            
-            # 2. 模糊匹配：处理 NoSubfolder 导致的根目录剥离或路径差异
+
+            # 2. 文件名级精确匹配（Transmission 场景：target=Folder/a.mkv, f_name=a.mkv）
+            if f_name and f_name in target_files:
+                ids_to_download.append(idx)
+                continue
+
+            # 3. 模糊匹配：处理 NoSubfolder 导致的根目录剥离或路径差异
             match_found = False
             for target_p in target_files:
-                # 如果 qB 路径是目标路径的后缀 (e.g. qB: "a.mkv", Target: "Folder/a.mkv")
+                if not target_p:
+                    continue
+                # 如果路径是目标路径的后缀 (e.g. "a.mkv", Target: "Folder/a.mkv")
                 if target_p.endswith('/' + f_path):
                     match_found = True
                     break
-                # 如果目标路径是 qB 路径的后缀 (e.g. qB: "Folder/a.mkv", Target: "a.mkv")
+                # 如果目标路径是路径的后缀 (e.g. "Folder/a.mkv", Target: "a.mkv")
                 if f_path.endswith('/' + target_p):
                     match_found = True
                     break
-            
+                # 文件名后缀匹配（Transmission 纯文件名 vs 目标完整路径）
+                if f_name and f_name == target_p.rsplit('/', 1)[-1]:
+                    match_found = True
+                    break
+
             if match_found:
                 ids_to_download.append(idx)
             else:

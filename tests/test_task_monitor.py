@@ -126,6 +126,87 @@ class TestHasAnyFolder:
         assert monitor._has_any_folder(client, "hash") is True
 
 
+class TestFolderDetectionAcrossBackends:
+    """_has_any_folder / _has_nested_folders 必须优先看 path。
+
+    回归：各后端对文件 name 的语义不一致——qBittorrent 的 name 是含目录的相对
+    路径，Transmission 的 name 已被剥成纯文件名（完整路径放在 path）。只看 name
+    会把 Transmission 的带目录种子误判为「仅根目录文件」，使 use_qb_move 判据
+    为真，把本该复制的任务错误送进移动分支。
+    """
+
+    def test_transmission_style_path_carries_dir(self):
+        """Transmission 形态：name 只有文件名，path 含目录 → 判为带目录"""
+        client = MagicMock()
+        client.get_torrent_files.return_value = [
+            {"index": 0, "name": "classicalhd.mkv",
+             "path": "www.UIndex.org - Sintel/classicalhd.mkv", "size": 100},
+            {"index": 1, "name": "shot.png",
+             "path": "www.UIndex.org - Sintel/Screens/shot.png", "size": 10},
+        ]
+        monitor = TaskMonitor()
+        assert monitor._has_any_folder(client, "hash") is True
+        assert monitor._has_nested_folders(client, "hash") is True
+
+    def test_root_only_files_stay_false(self):
+        """真正的根目录多文件（path 也不含 '/'）→ False"""
+        client = MagicMock()
+        client.get_torrent_files.return_value = [
+            {"index": 0, "name": "a.mkv", "path": "a.mkv", "size": 100},
+            {"index": 1, "name": "b.nfo", "path": "b.nfo", "size": 10},
+        ]
+        assert TaskMonitor()._has_any_folder(client, "hash") is False
+
+
+class TestVerifyMoveToleratesMissingInfo:
+    """_verify_move：种子在移动过程中短暂查不到时不得立刻判失败。
+
+    回归：Transmission 移动大文件期间 get_torrent_info 会返回 None。原实现第一次
+    拿不到就 break → 判移动失败 → 降级本程序复制；此时源文件已被移走，复制必然
+    报「无法找到种子根路径」。实测移动其实是成功的（下一轮 save_path 已在目标）。
+    """
+
+    @staticmethod
+    def _config_get():
+        def config_get(key, default=None):
+            if key == "qbittorrent.move_verify_timeout_seconds":
+                return 10
+            if key == "qbittorrent.move_verify_poll_seconds":
+                return 0.5
+            return default
+        return config_get
+
+    @patch("app.services.task_monitor.db")
+    @patch("app.services.task_monitor.config")
+    def test_keeps_polling_when_info_missing(self, mock_config, mock_db, tmp_path):
+        """全程取不到种子信息时，不应第一次就放弃"""
+        mock_config.get.side_effect = self._config_get()
+        target = str(tmp_path / "target")
+        client = MagicMock()
+        client.get_torrent_info.return_value = None
+
+        with patch("app.services.task_monitor.time.sleep"):
+            ok = TaskMonitor()._verify_move(client, "h" * 40, target, target, [])
+
+        assert ok is False
+        assert client.get_torrent_info.call_count > 1, "第一次拿不到就 break 是回归"
+
+    @patch("app.services.task_monitor.db")
+    @patch("app.services.task_monitor.config")
+    def test_gives_up_after_streak_threshold(self, mock_config, mock_db, tmp_path):
+        """持续取不到时仍会放弃，不会空转到验证超时之外"""
+        mock_config.get.side_effect = self._config_get()
+        target = str(tmp_path / "target")
+        client = MagicMock()
+        client.get_torrent_info.return_value = None
+
+        with patch("app.services.task_monitor.time.sleep"):
+            ok = TaskMonitor()._verify_move(client, "h" * 40, target, target, [])
+
+        assert ok is False
+        assert client.get_torrent_info.call_count == 5
+
+
 class TestMoveVsCopyDecision:
     """use_qb_move 决策：仅根目录文件可移动；带目录则 use_copy 时复制"""
 
@@ -332,6 +413,54 @@ class TestProcessCopyWithFakeFiles:
 
     @patch("app.services.task_monitor.db")
     @patch("app.services.task_monitor.config")
+    def test_process_copy_keeps_files_without_rename(self, mock_config, mock_db, tmp_path, fake_download_layout):
+        """file_rename 为空表示「保持原名归档」，不是「跳过此文件」。
+
+        回归：此前对空 file_rename 直接 continue，复制降级路径便只搬走被改名的文件
+        （通常仅主视频和 nfo），种子里的字幕/截图/样片全部静默丢失。aria2 这类只能
+        走复制的后端尤其明显，且与移动路径整目录搬家的结果不一致。
+        """
+        content_path = str(fake_download_layout)
+        screens = fake_download_layout / "Screens"
+        screens.mkdir()
+        (screens / "screen0001.png").write_bytes(b"fake png")
+
+        def config_get(key, default=None):
+            if key == "paths.default_target_path":
+                return str(tmp_path)
+            if key == "paths":
+                return {}
+            if key == "qbittorrent.file_handling.copy_delete_on_complete":
+                return False
+            return default
+
+        mock_config.get.side_effect = config_get
+
+        task = {"id": 11, "taskName": "keep_names_test", "targetPath": "archive"}
+        file_tasks = [
+            {"id": 1, "sourcePath": "qb_download/Movie.2024.1080p.mkv",
+             "targetPath": "", "file_rename": "Renamed (2010).mkv", "file_status": "completed"},
+            # 没有 file_rename：仍应被归档，只是保持原文件名
+            {"id": 2, "sourcePath": "qb_download/Screens/screen0001.png",
+             "targetPath": "", "file_rename": "", "file_status": "completed"},
+        ]
+        torrent_info = {
+            "content_path": content_path,
+            "save_path": os.path.dirname(content_path),
+            "name": os.path.basename(content_path),
+        }
+
+        result = TaskMonitor()._process_copy(
+            MagicMock(), task, "hash", torrent_info, "archive", file_tasks)
+
+        dest_dir = tmp_path / "archive"
+        assert (dest_dir / "Renamed (2010).mkv").exists(), "被改名的文件应归档"
+        assert (dest_dir / "screen0001.png").exists(), "未改名的文件同样应归档，而不是被跳过"
+        assert (dest_dir / "screen0001.png").read_bytes() == b"fake png"
+        assert result in ("completed", "seeding")
+
+    @patch("app.services.task_monitor.db")
+    @patch("app.services.task_monitor.config")
     def test_process_copy_whole_folder_no_file_tasks(self, mock_config, mock_db, tmp_path, fake_download_layout):
         """无 file_tasks：复制整个 content_path 到目标（保留根目录名）"""
         content_path = str(fake_download_layout)
@@ -366,3 +495,137 @@ class TestProcessCopyWithFakeFiles:
         assert dest_folder.is_dir()
         assert (dest_folder / "Movie.2024.1080p.mkv").exists()
         assert (dest_folder / "Movie.zh.srt").exists()
+
+
+# ---------------------------------------------------------------------------
+# 归档终态：目标已存在时不得把任务永久留在 moving
+# ---------------------------------------------------------------------------
+
+class TestArchiveTerminalState:
+    """目标文件已存在时的归档返回值。
+
+    回归：此前「所有目标文件都已存在」会落到 _process_copy 的 return None，
+    调用方 _handle_completed_task 把 None 当成「未成功」而保持 moving，
+    任务便永久卡在 moving —— 每 10s 重试一次并重复插入「任务待重试」通知。
+    """
+
+    @pytest.fixture
+    def fake_download_layout(self, tmp_path):
+        root = tmp_path / "qb_download"
+        root.mkdir()
+        (root / "Movie.2024.1080p.mkv").write_bytes(b"fake video content")
+        return root
+
+    @staticmethod
+    def _config_get(tmp_path):
+        def config_get(key, default=None):
+            if key == "paths.default_target_path":
+                return str(tmp_path)
+            if key == "paths":
+                return {}
+            if key in ("paths.target_root_path", "paths.download_root_path", "paths.root_path"):
+                return ""
+            if key == "qbittorrent.file_handling.copy_delete_on_complete":
+                return False
+            if key == "qbittorrent.seeding.limit_ratio":
+                return -1.0
+            return default
+        return config_get
+
+    @patch("app.services.task_monitor.db")
+    @patch("app.services.task_monitor.config")
+    def test_all_files_existing_returns_terminal(self, mock_config, mock_db, tmp_path, fake_download_layout):
+        """有 file_tasks 且目标全部已存在 → 视为归档完成，返回终态而非 None"""
+        mock_config.get.side_effect = self._config_get(tmp_path)
+        (tmp_path / "archive").mkdir()
+        (tmp_path / "archive" / "Movie.2024.1080p.mkv").write_bytes(b"already there")
+
+        task = {"id": 20, "taskName": "exists", "targetPath": "archive"}
+        file_tasks = [
+            {"id": 1, "sourcePath": "Movie.2024.1080p.mkv", "targetPath": "",
+             "file_rename": "Movie.2024.1080p.mkv", "file_status": "completed"},
+        ]
+        torrent_info = {
+            "content_path": str(fake_download_layout),
+            "save_path": os.path.dirname(str(fake_download_layout)),
+            "name": os.path.basename(str(fake_download_layout)),
+        }
+        result = TaskMonitor()._process_copy(MagicMock(), task, "hash", torrent_info, "archive", file_tasks)
+
+        assert result == "completed", "目标已存在应视为归档完成，返回终态而非 None"
+        # 已存在的内容不应被覆盖
+        assert (tmp_path / "archive" / "Movie.2024.1080p.mkv").read_bytes() == b"already there"
+
+    @patch("app.services.task_monitor.db")
+    @patch("app.services.task_monitor.config")
+    def test_whole_folder_existing_returns_terminal(self, mock_config, mock_db, tmp_path, fake_download_layout):
+        """无 file_tasks 且目标文件夹已存在 → 同样返回终态"""
+        mock_config.get.side_effect = self._config_get(tmp_path)
+        (tmp_path / "archive").mkdir()
+        (tmp_path / "archive" / fake_download_layout.name).mkdir()
+
+        task = {"id": 21, "taskName": "exists_whole", "targetPath": "archive"}
+        torrent_info = {
+            "content_path": str(fake_download_layout),
+            "save_path": os.path.dirname(str(fake_download_layout)),
+            "name": os.path.basename(str(fake_download_layout)),
+        }
+        result = TaskMonitor()._process_copy(MagicMock(), task, "hash", torrent_info, "archive", None)
+
+        assert result == "completed"
+
+
+# ---------------------------------------------------------------------------
+# 移动归档：目标目录权限
+# ---------------------------------------------------------------------------
+
+class TestEnsureWritableDir:
+    """_ensure_writable_dir：预创建的目标目录必须对下载器进程可写。
+
+    回归：本程序（容器里多为 root）建的目录属主是自己，而下载器通常以 PUID
+    指定的普通用户运行（如 linuxserver 镜像的 abc=1000），写入会 Permission denied；
+    qBittorrent 的 setLocation 在这类失败下静默返回，上层只看到「移动验证超时」。
+    """
+
+    def test_chmods_target_to_world_writable(self, tmp_path):
+        d = tmp_path / "target"
+        d.mkdir()
+        with patch("app.services.task_monitor.os.chmod") as mock_chmod:
+            TaskMonitor._ensure_writable_dir(str(d))
+        mock_chmod.assert_called_once_with(str(d), 0o777)
+
+    def test_chmod_failure_is_not_fatal(self, tmp_path):
+        """chmod 失败（如只读挂载、路径消失）不应中断移动流程"""
+        with patch("app.services.task_monitor.os.chmod", side_effect=OSError("read-only")):
+            TaskMonitor._ensure_writable_dir(str(tmp_path))  # 不抛异常即通过
+
+
+class TestMoveEnsuresWritableTarget:
+    """_maybe_move_location 预创建目标目录后必须放开权限"""
+
+    @patch("app.services.task_monitor.db")
+    @patch("app.services.task_monitor.config")
+    def test_creates_then_ensures_writable(self, mock_config, mock_db, tmp_path):
+        mock_config.get.side_effect = lambda k, d=None: {
+            "paths": {},
+            "paths.target_root_path": "",
+            "paths.default_target_path": "",
+        }.get(k, d)
+
+        client = MagicMock()
+        client.set_location.return_value = True
+        target = tmp_path / "nas" / "Movie"
+
+        monitor = TaskMonitor()
+        with patch.object(monitor, "_ensure_writable_dir") as mock_writable:
+            is_moved, local_path, qb_path = monitor._maybe_move_location(
+                client, 1, "h" * 40,
+                {"save_path": "/dl/temp", "name": "TorrentName"},
+                str(target),
+            )
+
+        assert is_moved is True
+        client.set_location.assert_called_once()
+        # 目录已本地预创建，且建完就放开了权限
+        assert os.path.isdir(str(target))
+        mock_writable.assert_called_once_with(str(target))

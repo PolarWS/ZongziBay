@@ -212,6 +212,17 @@ const qbSeedingLimitRatio = ref<number | null>(null)
 const qbSeedingDeleteOnRatioReached = ref(false)
 const qbSeedingDeleteFiles = ref(false)
 
+// 下载器后端选择：qbittorrent / transmission / aria2
+type DownloaderType = 'qbittorrent' | 'transmission' | 'aria2'
+const downloaderType = ref<DownloaderType>('qbittorrent')
+const tmHost = ref('')
+const tmUsername = ref('')
+const tmPassword = ref('')
+const tmPasswordConfigured = ref(false)
+const aria2Host = ref('')
+const aria2Secret = ref('')
+const aria2SecretConfigured = ref(false)
+
 const piratebayUrl = ref('')
 const piratebayParams = ref('')
 
@@ -308,6 +319,21 @@ const applyConfigToForm = (cfg: Record<string, any>) => {
   tmdbApiDomain.value = tmdb.api_domain ?? ''
   tmdbImageDomain.value = tmdb.image_domain ?? ''
   isDefaultTmdbKey.value = !!tmdb._is_default_key
+
+  // downloader 节：后端类型 + Transmission/Aria2 连接信息
+  const dl = cfg.downloader || {}
+  const dlActive = dl.active || 'qbittorrent'
+  if (dlActive === 'transmission' || dlActive === 'aria2') downloaderType.value = dlActive
+  else downloaderType.value = 'qbittorrent'
+  const tmDl = dl.transmission || {}
+  tmHost.value = tmDl.host ?? ''
+  tmUsername.value = tmDl.username ?? ''
+  tmPasswordConfigured.value = !!(tmDl.password && tmDl.password !== '')
+  tmPassword.value = displaySecret(tmDl.password)
+  const ariaDl = dl.aria2 || {}
+  aria2Host.value = ariaDl.host ?? ''
+  aria2SecretConfigured.value = !!(ariaDl.secret && ariaDl.secret !== '')
+  aria2Secret.value = displaySecret(ariaDl.secret)
 
   const qb = cfg.qbittorrent || {}
   qbHost.value = qb.host ?? ''
@@ -413,6 +439,17 @@ const saveConfig = async () => {
   cfg.tmdb.language = tmdbLanguage.value
   cfg.tmdb.api_domain = tmdbApiDomain.value
   cfg.tmdb.image_domain = tmdbImageDomain.value
+
+  // downloader 节：后端类型 + Transmission/Aria2 连接信息
+  cfg.downloader = cfg.downloader || {}
+  cfg.downloader.active = downloaderType.value
+  cfg.downloader.transmission = cfg.downloader.transmission || {}
+  cfg.downloader.transmission.host = tmHost.value
+  cfg.downloader.transmission.username = tmUsername.value
+  cfg.downloader.transmission.password = saveSecret(tmPassword.value, tmPasswordConfigured.value)
+  cfg.downloader.aria2 = cfg.downloader.aria2 || {}
+  cfg.downloader.aria2.host = aria2Host.value
+  cfg.downloader.aria2.secret = saveSecret(aria2Secret.value, aria2SecretConfigured.value)
 
   cfg.qbittorrent = cfg.qbittorrent || {}
   cfg.qbittorrent.host = qbHost.value
@@ -551,22 +588,29 @@ const testAssrt = async () => {
   }
 }
 
+const DOWNLOADER_LABEL: Record<string, string> = {
+  qbittorrent: 'qBittorrent',
+  transmission: 'Transmission',
+  aria2: 'Aria2',
+}
+
 const testQb = async () => {
   testing.qb = true
   testResults.qb = null
+  const label = DOWNLOADER_LABEL[downloaderType.value] || '下载器'
   try {
     const res = await checkConnectionApiV1MagnetCheckGet()
     const data = (res as any)?.data
     const ok = data?.data ?? data
     if (ok) {
-      toast.success('qBittorrent 连接正常')
+      toast.success(`${label} 连接正常`)
       testResults.qb = true
     } else {
-      toast.error('qBittorrent 连接失败（请检查 host/账号密码/网络）')
+      toast.error(`${label} 连接失败（请检查 host/账号密码/网络）`)
       testResults.qb = false
     }
   } catch (e: any) {
-    toast.error(e?.message || 'qBittorrent 连接失败')
+    toast.error(e?.message || `${label} 连接失败`)
     testResults.qb = false
   } finally {
     testing.qb = false
@@ -1135,8 +1179,42 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- qBittorrent -->
+        <!-- 下载器后端 -->
         <div v-show="activeTab === 'qb'" class="space-y-3">
+          <div class="space-y-3">
+            <div>
+              <Label>下载器类型</Label>
+              <div class="flex flex-wrap gap-2 mt-2">
+                <Button
+                  :variant="downloaderType === 'qbittorrent' ? 'default' : 'outline'"
+                  size="sm"
+                  @click="downloaderType = 'qbittorrent'"
+                >
+                  qBittorrent
+                </Button>
+                <Button
+                  :variant="downloaderType === 'transmission' ? 'default' : 'outline'"
+                  size="sm"
+                  @click="downloaderType = 'transmission'"
+                >
+                  Transmission
+                </Button>
+                <Button
+                  :variant="downloaderType === 'aria2' ? 'default' : 'outline'"
+                  size="sm"
+                  @click="downloaderType = 'aria2'"
+                >
+                  Aria2
+                </Button>
+              </div>
+              <p class="text-xs text-muted-foreground mt-2">
+                选择后保存配置即可切换后端。切换后请确保下方连接信息与实际的下载器保持一致。
+              </p>
+            </div>
+          </div>
+
+          <!-- qBittorrent -->
+          <div v-if="downloaderType === 'qbittorrent'" class="space-y-3">
           <p class="text-xs text-muted-foreground">
             用于管理种子下载任务，请确保已开启 qBittorrent WebUI，并与下面的下载 / 归档路径保持一致。
           </p>
@@ -1211,6 +1289,69 @@ onUnmounted(() => {
               <div class="flex items-center gap-2">
                 <Checkbox v-model="qbSeedingDeleteFiles" />
                 <span class="text-xs text-muted-foreground">开启后删除任务会连同本地临时文件一起清理，请谨慎开启。</span>
+              </div>
+            </div>
+          </div>
+          </div>
+
+          <!-- Transmission -->
+          <div v-else-if="downloaderType === 'transmission'" class="space-y-3">
+            <p class="text-xs text-muted-foreground">
+              Transmission 通过 RPC 接口管理下载任务，请确保已开启 Transmission Web（默认 9091 端口）并配置 RPC 认证。
+            </p>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-1 sm:col-span-2">
+                <Label>RPC 地址</Label>
+                <input
+                  v-model="tmHost"
+                  placeholder="http://localhost:9091"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div class="space-y-1">
+                <Label>用户名</Label>
+                <input
+                  v-model="tmUsername"
+                  autocomplete="off"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div class="space-y-1">
+                <Label>密码</Label>
+                <input
+                  v-model="tmPassword"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="tmPasswordConfigured ? PLACEHOLDER_CONFIGURED : '请输入 RPC 密码'"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Aria2 -->
+          <div v-else-if="downloaderType === 'aria2'" class="space-y-3">
+            <p class="text-xs text-muted-foreground">
+              Aria2 通过 JSON-RPC 接口管理下载任务。注意：Aria2 不支持种子内重命名与移动归档，将降级为复制模式。
+            </p>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-1 sm:col-span-2">
+                <Label>RPC 地址</Label>
+                <input
+                  v-model="aria2Host"
+                  placeholder="http://localhost:6800"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+              <div class="space-y-1 sm:col-span-2">
+                <Label>RPC Secret</Label>
+                <input
+                  v-model="aria2Secret"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="aria2SecretConfigured ? PLACEHOLDER_CONFIGURED : 'rpc-secret'"
+                  class="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
               </div>
             </div>
           </div>

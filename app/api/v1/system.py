@@ -52,6 +52,15 @@ def _mask_sensitive_keys(cfg: Dict[str, Any]) -> Dict[str, Any]:
             qb["password"] = _MASKED_PLACEHOLDER
         if qb.get("api_key"):
             qb["api_key"] = _MASKED_PLACEHOLDER
+    # downloader 节：Transmission 密码 / Aria2 rpc-secret 属敏感字段，需脱敏
+    dl = cfg.get("downloader")
+    if isinstance(dl, dict):
+        transmission = dl.get("transmission")
+        if isinstance(transmission, dict) and transmission.get("password"):
+            transmission["password"] = _MASKED_PLACEHOLDER
+        aria2 = dl.get("aria2")
+        if isinstance(aria2, dict) and aria2.get("secret"):
+            aria2["secret"] = _MASKED_PLACEHOLDER
     security = cfg.get("security")
     if isinstance(security, dict):
         if security.get("password"):
@@ -96,6 +105,26 @@ def _restore_masked_keys(body: Dict[str, Any]) -> Dict[str, Any]:
             old_key = (existing.get("qbittorrent") or {}).get("api_key") or ""
             if old_key and old_key != _MASKED_PLACEHOLDER:
                 qb["api_key"] = old_key
+        if isinstance(qb.get("host"), str):
+            qb["host"] = qb["host"].strip().rstrip("/")
+    # downloader 节：恢复 Transmission 密码 / Aria2 rpc-secret
+    dl = body.get("downloader")
+    if isinstance(dl, dict):
+        transmission = dl.get("transmission")
+        if isinstance(transmission, dict) and transmission.get("password") == _MASKED_PLACEHOLDER:
+            old_pwd = ((existing.get("downloader") or {}).get("transmission") or {}).get("password") or ""
+            if old_pwd and old_pwd != _MASKED_PLACEHOLDER:
+                transmission["password"] = old_pwd
+        aria2 = dl.get("aria2")
+        if isinstance(aria2, dict) and aria2.get("secret") == _MASKED_PLACEHOLDER:
+            old_secret = ((existing.get("downloader") or {}).get("aria2") or {}).get("secret") or ""
+            if old_secret and old_secret != _MASKED_PLACEHOLDER:
+                aria2["secret"] = old_secret
+        # 地址归一化：设置页粘贴地址容易带上首尾空格，落库前统一清理
+        for backend in ("transmission", "aria2"):
+            section = dl.get(backend)
+            if isinstance(section, dict) and isinstance(section.get("host"), str):
+                section["host"] = section["host"].strip().rstrip("/")
 
     # 登录密码脱敏恢复 — 前端看不到真实值，按 tb"****"原样提交，需用已有哈希恢复
     sec = body.get("security")
@@ -439,57 +468,89 @@ async def test_connection(body: Dict[str, Any] = Body(..., embed=False)):
     else:
         results["tmdb"] = {"success": False, "message": "未配置 API Key"}
 
-    # --- qBittorrent ---
-    qb_host = body.get("qb_host", "") or config.get("qbittorrent.host", "")
-    qb_username = body.get("qb_username", "") or config.get("qbittorrent.username", "")
-    qb_password = body.get("qb_password", "") or config.get("qbittorrent.password", "")
-    qb_api_key = body.get("qb_api_key", "") or config.get("qbittorrent.api_key", "")
-    if qb_host:
+    # --- 下载器后端测试 ---
+    # 支持通过 downloader 对象指定要测试的后端（引导页/设置页传入）
+    dl_body = body.get("downloader") if isinstance(body.get("downloader"), dict) else {}
+    dl_active = (dl_body.get("active") or config.get("downloader.active", "qbittorrent") or "qbittorrent").lower()
+
+    if dl_active in ("transmission", "aria2"):
+        # 用统一下载器适配器测试 Transmission / Aria2
         try:
-            session = requests.Session()
-            session.headers.update({"Referer": qb_host})
-            if qb_api_key:
-                session.headers["Authorization"] = f"Bearer {qb_api_key}"
-                version_resp = session.get(f"{qb_host.rstrip('/')}/api/v2/app/version", timeout=10)
-                if version_resp.status_code == 200:
-                    results["qbittorrent"] = {
-                        "success": True,
-                        "message": "连接成功",
-                    }
-                else:
-                    results["qbittorrent"] = {"success": False, "message": f"API Key 无效: HTTP {version_resp.status_code}"}
-            elif qb_username and qb_password:
-                login_resp = session.post(
-                    f"{qb_host.rstrip('/')}/api/v2/auth/login",
-                    data={"username": qb_username, "password": qb_password},
-                    timeout=10,
+            from app.core.downloader.transmission import TransmissionDownloader
+            from app.core.downloader.aria2 import Aria2Downloader
+            if dl_active == "transmission":
+                t = dl_body.get("transmission") or config.get("downloader.transmission", {}) or {}
+                client = TransmissionDownloader(
+                    host=t.get("host", "http://localhost:9091"),
+                    username=t.get("username", ""),
+                    password=t.get("password", ""),
                 )
-                if login_resp.status_code == 200 and "Ok." in login_resp.text:
-                    version_resp = session.get(f"{qb_host.rstrip('/')}/api/v2/app/version", timeout=10)
-                    if version_resp.status_code == 200:
-                        results["qbittorrent"] = {
-                            "success": True,
-                            "message": "连接成功",
-                        }
-                    else:
-                        results["qbittorrent"] = {"success": False, "message": "登录成功但获取版本失败"}
-                elif login_resp.status_code == 204:
-                    version_resp = session.get(f"{qb_host.rstrip('/')}/api/v2/app/version", timeout=10)
-                    if version_resp.status_code == 200:
-                        results["qbittorrent"] = {
-                            "success": True,
-                            "message": "连接成功",
-                        }
-                    else:
-                        results["qbittorrent"] = {"success": False, "message": "登录成功但获取版本失败"}
-                else:
-                    results["qbittorrent"] = {"success": False, "message": "用户名或密码错误"}
+                label = "Transmission"
             else:
-                results["qbittorrent"] = {"success": False, "message": "未配置认证信息"}
-        except requests.RequestException as e:
-            results["qbittorrent"] = {"success": False, "message": f"无法连接: {str(e)}"}
+                a = dl_body.get("aria2") or config.get("downloader.aria2", {}) or {}
+                client = Aria2Downloader(
+                    host=a.get("host", "http://localhost:6800"),
+                    secret=a.get("secret", ""),
+                )
+                label = "Aria2"
+            if client.check_connection():
+                results["qbittorrent"] = {"success": True, "message": f"{label} 连接成功"}
+            else:
+                results["qbittorrent"] = {"success": False, "message": f"{label} 连接失败，请检查地址/认证信息"}
+        except Exception as e:
+            results["qbittorrent"] = {"success": False, "message": f"无法连接 {dl_active}: {str(e)}"}
     else:
-        results["qbittorrent"] = {"success": False, "message": "未配置 Host 地址"}
+        # --- qBittorrent ---
+        qb_host = body.get("qb_host", "") or config.get("qbittorrent.host", "")
+        qb_username = body.get("qb_username", "") or config.get("qbittorrent.username", "")
+        qb_password = body.get("qb_password", "") or config.get("qbittorrent.password", "")
+        qb_api_key = body.get("qb_api_key", "") or config.get("qbittorrent.api_key", "")
+        if qb_host:
+            try:
+                session = requests.Session()
+                session.headers.update({"Referer": qb_host})
+                if qb_api_key:
+                    session.headers["Authorization"] = f"Bearer {qb_api_key}"
+                    version_resp = session.get(f"{qb_host.rstrip('/')}/api/v2/app/version", timeout=10)
+                    if version_resp.status_code == 200:
+                        results["qbittorrent"] = {
+                            "success": True,
+                            "message": "连接成功",
+                        }
+                    else:
+                        results["qbittorrent"] = {"success": False, "message": f"API Key 无效: HTTP {version_resp.status_code}"}
+                elif qb_username and qb_password:
+                    login_resp = session.post(
+                        f"{qb_host.rstrip('/')}/api/v2/auth/login",
+                        data={"username": qb_username, "password": qb_password},
+                        timeout=10,
+                    )
+                    if login_resp.status_code == 200 and "Ok." in login_resp.text:
+                        version_resp = session.get(f"{qb_host.rstrip('/')}/api/v2/app/version", timeout=10)
+                        if version_resp.status_code == 200:
+                            results["qbittorrent"] = {
+                                "success": True,
+                                "message": "连接成功",
+                            }
+                        else:
+                            results["qbittorrent"] = {"success": False, "message": "登录成功但获取版本失败"}
+                    elif login_resp.status_code == 204:
+                        version_resp = session.get(f"{qb_host.rstrip('/')}/api/v2/app/version", timeout=10)
+                        if version_resp.status_code == 200:
+                            results["qbittorrent"] = {
+                                "success": True,
+                                "message": "连接成功",
+                            }
+                        else:
+                            results["qbittorrent"] = {"success": False, "message": "登录成功但获取版本失败"}
+                    else:
+                        results["qbittorrent"] = {"success": False, "message": "用户名或密码错误"}
+                else:
+                    results["qbittorrent"] = {"success": False, "message": "未配置认证信息"}
+            except requests.RequestException as e:
+                results["qbittorrent"] = {"success": False, "message": f"无法连接: {str(e)}"}
+        else:
+            results["qbittorrent"] = {"success": False, "message": "未配置 Host 地址"}
 
     # --- PirateBay ---
     piratebay_url = body.get("piratebay_url", "https://apibay.org/q.php")
@@ -567,6 +628,8 @@ async def setup_system(body: Dict[str, Any] = Body(..., embed=False)):
     qb_username = body.get("qb_username", "").strip()
     qb_password = body.get("qb_password", "").strip()
     qb_api_key = body.get("qb_api_key", "").strip()
+    # downloader 节：active + 各后端连接信息（前端设置页/引导页可直接传整个 downloader 对象）
+    downloader_cfg = body.get("downloader")
     tmdb_api_key = body.get("tmdb_api_key", "").strip()
     tmdb_api_domain = _strip_protocol(body.get("tmdb_api_domain", "https://api.themoviedb.org"))
     assrt_token = body.get("assrt_token", "").strip()
@@ -624,6 +687,13 @@ async def setup_system(body: Dict[str, Any] = Body(..., embed=False)):
                 cfg["qbittorrent"]["password"] = qb_password
             if qb_api_key:
                 cfg["qbittorrent"]["api_key"] = qb_api_key
+
+        # 下载器后端选择（引导页可传入整个 downloader 对象）
+        if isinstance(downloader_cfg, dict):
+            cfg["downloader"] = _restore_masked_keys({"downloader": downloader_cfg}).get("downloader", {})
+        elif not cfg.get("downloader"):
+            # 未传入时保证 downloader 节存在（默认 qbittorrent）
+            cfg["downloader"] = {"active": "qbittorrent"}
 
         # ASSRT
         if assrt_token:

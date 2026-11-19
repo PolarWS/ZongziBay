@@ -27,6 +27,19 @@ from app.core import db
 from app.main import app
 
 
+@pytest.fixture(autouse=True)
+def _reset_login_rate_limiter():
+    """每个测试前重置登录限流器。
+
+    登录限流器是进程级单例，跨测试文件共享；完整测试套件大量登录会触发
+    每分钟 30 次限制，导致后续测试登录失败。测试环境应视为可信，跳过限流。
+    """
+    from app.core.rate_limiter import login_rate_limiter
+    login_rate_limiter.reset("testclient")
+    yield
+    login_rate_limiter.reset("testclient")
+
+
 @pytest.fixture(scope="session")
 def _cleanup_test_db():
     """会话结束删除临时数据库"""

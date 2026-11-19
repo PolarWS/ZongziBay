@@ -73,7 +73,7 @@
 │   ├── vitest.config.ts # 前端测试配置
 │   └── package.json
 ├── tests/               # 后端 pytest 测试（372 用例）
-├── .github/workflows/   # CI/CD（前后端自动化测试）
+├── .github/workflows/   # CI/CD（前后端自动化测试 + release 发版发布）
 └── requirements.txt
 ```
 
@@ -94,6 +94,19 @@ cd web && npm run test
 ```
 
 测试使用 mock 隔离外部依赖，不依赖真实网络或 qBittorrent 实例。更多说明见 《[测试说明](/docs/readme_test.md)》
+
+---
+
+## 发版
+
+推送 `release` 分支即自动发版：跑前后端测试 → 构建 `linux/amd64` + `linux/arm64` 镜像
+→ 推送 Docker Hub → 自动打 tag → 创建 GitHub Release。
+
+```powershell
+.\script\release.ps1 1.0.0-rc.11   # 改版本号、提交并推 release 分支
+```
+
+首次配置（Docker Hub Token 等）与完整流程见 《[发版说明](/docs/release.md)》
 
 ---
 
