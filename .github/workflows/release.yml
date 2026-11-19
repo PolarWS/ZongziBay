@@ -1,0 +1,313 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 发版流水线（release 分支专用）
+#
+# 触发方式：
+#   1. push 到 release 分支   —— 常规发版（推荐，见 docs/release.md）
+#   2. push v* tag            —— 补发，或从历史提交重发
+#   3. Actions 里手动 Run     —— 指定版本号重发
+#
+# 一次发版做这些事：
+#   版本一致性校验 → 后端 pytest → 前端 vitest → 多架构构建（amd64 + arm64）
+#   → 推送 Docker Hub → 校验 manifest → 自动打 tag → 创建 GitHub Release
+#
+# 一次性配置（Settings → Secrets and variables → Actions）：
+#   DOCKERHUB_USERNAME  Docker Hub 用户名
+#   DOCKERHUB_TOKEN     Docker Hub Access Token（Read & Write）
+#
+# 详细说明见 docs/release.md
+# ─────────────────────────────────────────────────────────────────────────────
+name: Release
+
+on:
+  push:
+    branches: [release]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（不带 v；留空则用 VERSION 文件里的值）'
+        required: false
+        default: ''
+
+# 发版任务串行执行：两条流水线同时推 latest 会互相覆盖
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: polarws/zongzibay
+  PLATFORMS: linux/amd64,linux/arm64
+
+# 需要写仓库：推 tag、建 Release
+permissions:
+  contents: write
+
+jobs:
+  # ─── 1. 解析版本号并做一致性校验 ─────────────────────────────
+  version:
+    name: 校验版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      tag_exists: ${{ steps.resolve.outputs.tag_exists }}
+      is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 解析并校验
+        id: resolve
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          fail() { echo "::error::$*"; exit 1; }
+
+          file_version="$(tr -d ' \t\r\n' < VERSION)"
+          pkg_version="$(node -p "require('./web/package.json').version")"
+          lock_version="$(node -p "require('./web/package-lock.json').version")"
+          lock_pkg_version="$(node -p "require('./web/package-lock.json').packages[''].version")"
+
+          # tag 触发用 tag 名，手动触发用输入值，分支触发用 VERSION 文件
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            version="${REF_NAME#v}"
+          elif [[ -n "${INPUT_VERSION:-}" ]]; then
+            version="${INPUT_VERSION#v}"
+          else
+            version="$file_version"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            fail "版本号格式不合法：$version（示例：1.0.0、1.0.0-rc.11）"
+          fi
+
+          # 四处版本号必须完全一致，否则打出来的镜像会自相矛盾
+          mismatch=""
+          check() {
+            if [[ "$2" != "$1" ]]; then
+              mismatch+="  $3 = $2（应为 $1）"$'\n'
+            fi
+          }
+          check "$version" "$file_version" "VERSION"
+          check "$version" "$pkg_version" "web/package.json"
+          check "$version" "$lock_version" "web/package-lock.json#version"
+          check "$version" "$lock_pkg_version" "web/package-lock.json#packages[\"\"].version"
+
+          if [[ -n "$mismatch" ]]; then
+            printf '版本号不一致，目标版本：%s\n%s' "$version" "$mismatch" >&2
+            fail "版本号不一致，先用 script/release.ps1 或 script/release.sh 统一版本"
+          fi
+
+          # 允许重跑：tag 已存在时，只有指向当前提交才放行
+          tag="v${version}"
+          tag_exists=false
+          if tag_commit="$(git rev-list -n1 "refs/tags/${tag}" 2>/dev/null)"; then
+            tag_exists=true
+            if [[ "$tag_commit" != "$SHA" ]]; then
+              fail "tag ${tag} 已存在于 ${tag_commit:0:10}，当前提交是 ${SHA:0:10}：该版本发过了，请先升版本号"
+            fi
+            echo "tag ${tag} 已存在且指向当前提交，本次按重发处理"
+          fi
+
+          is_prerelease=false
+          if [[ "$version" == *-* ]]; then
+            is_prerelease=true
+          fi
+
+          echo "版本：$version（预发布：$is_prerelease，tag：$tag，已存在：$tag_exists）"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "tag_exists=$tag_exists"
+            echo "is_prerelease=$is_prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+  # ─── 2. 发布前测试：不过就不发，Docker Hub 上的镜像收不回来 ──
+  test-backend:
+    name: 后端测试
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: pytest
+        run: python -m pytest tests/ -v --tb=short
+
+  test-frontend:
+    name: 前端测试
+    needs: version
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: vitest
+        run: npx vitest run
+
+  # ─── 3. 多架构构建并推送 Docker Hub ──────────────────────────
+  publish:
+    name: 构建并推送镜像
+    needs: [version, test-backend, test-frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 QEMU（arm64 在 amd64 机器上靠它模拟）
+        uses: docker/setup-qemu-action@v3
+
+      - name: 安装 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 生成镜像元数据
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=ZongziBay
+            org.opencontainers.image.description=粽子湾 —— 影视下载管理与自动归档
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: 构建并推送
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            TZ=Asia/Shanghai
+          # 关掉 provenance：它会在 manifest list 里塞进 unknown/unknown 条目，
+          # 老版本 Docker（NAS 上很常见）拉到这种 manifest 会报
+          # "no matching manifest for linux/amd64 in the manifest list entries"
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 校验 manifest（amd64 与 arm64 必须都在）
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${IMAGE_NAME}:${{ needs.version.outputs.version }}"
+          docker buildx imagetools inspect "$image" | tee /tmp/manifest.txt
+          grep -q 'linux/amd64' /tmp/manifest.txt || { echo "::error::manifest 缺少 linux/amd64"; exit 1; }
+          grep -q 'linux/arm64' /tmp/manifest.txt || { echo "::error::manifest 缺少 linux/arm64"; exit 1; }
+
+      - name: 运行摘要
+        shell: bash
+        run: |
+          {
+            echo "### 镜像已发布"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 镜像 | \`${IMAGE_NAME}:${{ needs.version.outputs.version }}\` |"
+            echo "| latest | \`${IMAGE_NAME}:latest\` |"
+            echo "| 架构 | \`linux/amd64, linux/arm64\` |"
+            echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─── 4. 打 tag + 建 GitHub Release ───────────────────────────
+  # 放在镜像推送成功之后：构建失败就不会留下“有 tag 没镜像”的版本
+  github-release:
+    name: 打 tag 并创建 Release
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 创建并推送 tag
+        shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          TAG_EXISTS: ${{ needs.version.outputs.tag_exists }}
+        run: |
+          set -euo pipefail
+          if [[ "$TAG_EXISTS" == "true" ]] || git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "tag $TAG 已存在，跳过"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "ZongziBay $TAG"
+          git push origin "$TAG"
+
+      - name: 创建 GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，跳过"
+            exit 0
+          fi
+
+          args=(--title "ZongziBay $VERSION" --generate-notes)
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$TAG" "${args[@]}"
+
+          # 在自动生成的变更列表后面补一段 Docker 拉取说明
+          body="$(mktemp)"
+          gh release view "$TAG" --json body -q .body > "$body"
+          {
+            echo ""
+            echo "## Docker 镜像"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${IMAGE_NAME}:${VERSION}"
+            echo '```'
+            echo ""
+            echo "支持 linux/amd64 与 linux/arm64，\`latest\` 同步指向该版本。"
+          } >> "$body"
+          gh release edit "$TAG" --notes-file "$body"
